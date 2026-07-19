@@ -59,10 +59,10 @@ All notable changes to this project are documented here. The format follows
     "Locked." note with disabled buttons when it is `false`.
   - Store surface: `QuestionStore.listNotifications*/countNotifications*/hasNotificationForBuild` and
     `canAnswerEffective`; ownership resolved via `CauseResolver.isRealUser`.
-- **Multi-question "series" modal** — when two or more questions are waiting for the same scope, the
-  bell dropdown and job-page box offer **"Answer all (N)"**, opening one modal that pages through the
-  questions with a numbered slider (Prev/Next + clickable pips, answered slides marked done). The
-  build-list dot opens the series directly when its build has more than one waiting question.
+- **Multi-question "series" modal** — when a single build has two or more questions waiting (e.g. an
+  agent posts a series), its build-list dot opens one modal that pages through them with a numbered
+  slider (Prev/Next + clickable pips, answered slides marked done). Individual questions on the other
+  surfaces (bell dropdown, job-page box) are still answered one at a time.
 
 ### Changed
 - **Build-list badge is now an empty red pulsing dot that opens the answer modal in place.** It no
@@ -101,10 +101,10 @@ All notable changes to this project are documented here. The format follows
   it ran it failed to find the existing link and cloned a duplicate. The match is now
   slash-insensitive (`normPath`), and the count re-labels / the row hides live on answer (via the poll
   and the `ii:answered` event) without a page reload.
-- **Series ("Answer all") modal no longer loses a half-typed answer.** Paging between questions
-  re-fetched each one and rebuilt the form empty, discarding unsubmitted free text / the selected
-  choice. The pager now snapshots a per-question **draft** before navigating and restores it, rendering
-  each slide from the already-fetched list item instead of re-fetching.
+- **Series modal no longer loses a half-typed answer.** Paging between questions re-fetched each one and
+  rebuilt the form empty, discarding unsubmitted free text / the selected choice. The pager now snapshots
+  a per-question **draft** before navigating and restores it, rendering each slide from the
+  already-fetched list item instead of re-fetching.
 - **Stale ("dummy") bridged notifications now clear promptly.** When a native `input` (surfaced by
   `inputStepBridge`) was answered through the built-in console/stage-view UI, our mirror stayed WAITING
   — showing a stale entry in the bell and a stale build-list badge — until the next 30s ticker
@@ -129,6 +129,17 @@ All notable changes to this project are documented here. The format follows
   plumbing (keyed off `InputAction`). With `inputStepBridge` on, native `input` steps keep that cell
   *and* mirror into our surfaces. `askInteractive` advertises its pause through our own surfaces (box,
   pulsing badge, sidebar, bell, anchored console link) rather than drawing the native cell.
+
+### Documentation
+- **README scenario gallery + guided tour.** New *Human-in-the-loop scenarios* section with annotated
+  screenshots of all six agent shapes (approve/deny, single option, multiple choice, multiple choice +
+  user input, free text, series slider) plus a list of non-AI (human/CI-driven) uses; a *Drive it from
+  an AI agent (Python)* section with the Cursor-SDK wiring and one argument snippet per shape; and a
+  *Settings and screens* tour of the Appearance settings, the per-pipeline notification preview, and the
+  per-build Interactive Input audit page (screenshots under `docs/screenshots/`).
+- **Search / discoverability.** Refined the plugin `<description>` for plugin-site search, and documented
+  the recommended Marketplace labels as GitHub topics (`ai`, `notification`, `ui`, `devops`) in
+  `HOSTING.md` §1.6 — with the rationale and the topics deliberately excluded (`pipeline`, `agent`).
 
 ## [0.1.0] - 2026-07-19
 

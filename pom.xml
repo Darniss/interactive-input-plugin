@@ -17,7 +17,7 @@
   <packaging>hpi</packaging>
 
   <name>Interactive Input</name>
-  <description>Adds an in-UI notification bell and a rich human-in-the-loop modal for Jenkins pipelines that pause on input. Provides an askInteractive pipeline step, a versioned REST API for external agents, and an opt-in bridge that surfaces existing input steps. Zero AI dependency at runtime.</description>
+  <description>Interactive human-in-the-loop (HITL) input for Jenkins pipelines: an in-UI notification bell and a rich approval modal for builds that pause for a human decision. Adds an askInteractive pipeline step and a versioned REST API so any external or AI agent can answer approvals programmatically, plus an opt-in bridge that surfaces existing input steps. No AI dependency at runtime.</description>
   <url>https://github.com/jenkinsci/interactive-input-plugin</url>
   <inceptionYear>2026</inceptionYear>
 
