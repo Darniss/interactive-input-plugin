@@ -49,8 +49,11 @@ Both pause a pipeline and wait for a human. Here is what changes:
 | Capability | Built‑in `input` | `interactive-input` |
 |---|---|---|
 | Pause a pipeline for a human decision | ✅ | ✅ (`askInteractive`) |
-| **In‑UI notification bell + unread count** | ❌ (silent until you open the build) | ✅ nav‑bar/floating bell, polled |
-| **Rich modal** (context panel, per‑choice rationale) | ❌ message + OK only | ✅ Markdown context, choices with a "why", free‑text w/ live preview |
+| **Per‑project notification centre** | ❌ | ✅ job‑page box + page, build‑history "awaiting input" badge, per‑build audit view |
+| **In‑UI notification bell** | ❌ (silent until you open the build) | ✅ opt‑in global bell, header‑anchored, **context‑scoped** (dashboard = all answerable, inside a pipeline = that pipeline only), polled |
+| **Shows who started the build** | ❌ | ✅ "started by &lt;user&gt;" on every surface |
+| **Anchored console audit link** | ⚠️ links to the input form | ✅ links to a full audit view (what was shown + what was chosen) + "Paused" flow marker |
+| **Rich modal** (context panel, per‑choice rationale) | ❌ message + OK only | ✅ Markdown context (expanded by default), choices with a "why", free‑text w/ live preview |
 | **Structured choices with rationale** | ⚠️ via form parameters only | ✅ `[id, label, why]` first‑class |
 | **Versioned JSON REST API** for external agents | ❌ (internal Stapler form POST) | ✅ `/interactive-input/api/v1/**` |
 | **Answer from a script / bot / AI agent** | ⚠️ brittle (scrape crumb + form) | ✅ documented `POST …/answer` contract |
@@ -68,8 +71,14 @@ Both pause a pipeline and wait for a human. Here is what changes:
 
 ## Features
 
-- 🔔 **Notification bell** — a badge with the count of questions *you* are allowed to answer, polled at a configurable cadence (no WebSocket/SSE, so it works through every corporate proxy).
-- 🪟 **Rich modal** — Markdown context panel, radio choices each with an optional rationale, optional free‑text with a live (server‑sanitised) preview, full keyboard/focus‑trap accessibility.
+- 📍 **Per‑project notification centre** — notifications surface *where the work is*, not at one Jenkins‑wide point: a box + sidebar page on each pipeline/job listing its pending questions, an "awaiting input" badge next to the relevant build in the build‑history list, and a per‑build audit view. On by default (`perProjectCentre`, under **Appearance**). The inline job‑page box has its **own** on/off switch (`jobPageBox`, on by default) so you can keep the badge + sidebar without the big box.
+- 👁️ **Attention pulse** — the build‑history "awaiting input" badge and the job‑page box title **blink slowly in red** to catch the eye, with a `prefers-reduced-motion` fallback that disables the animation for motion‑sensitive users.
+- 🎛️ **Choosable notification icon** — pick the icon used across the bell, badge and sidebar from eight meaning‑matched Ionicons (speech bubble *(default)*, raised hand, person, pull‑request, megaphone, hourglass, alert, classic bell) under **Appearance**.
+- 👤 **Attribution** — every surface shows **who started the build** ("started by &lt;user&gt;", or `scm`/`timer`/`upstream`/`system`), so reviewers can tell whose job is waiting.
+- 🔗 **Console audit link** — like the built‑in `input`, the build log gets an anchored link at the point of invocation; clicking it opens the audit view showing what was displayed and what was chosen. The flow node is also marked **Paused** so stage/flow views reflect the wait, and the outcome (answered/aborted/expired, by whom) is logged.
+- 🔔 **Global notification bell** — an optional header badge with the count of questions *you* can answer, polled at a configurable cadence (no WebSocket/SSE, so it works through every corporate proxy). **Context‑scoped**: on the dashboard it lists **every** answerable question; inside a pipeline (a job/build page) it narrows to **that pipeline's** questions. **Off by default** (`notificationCentre`, under **Appearance**); anchored into the header controls (with a bottom‑right floating fallback) so it never overlaps the settings gear.
+- 🪟 **Rich modal** — Markdown context panel (**expanded by default**), radio choices each with an optional rationale, optional free‑text with a live (server‑sanitised) preview, full keyboard/focus‑trap accessibility. Shared by the bell and every per‑project surface.
+- 📨 **Per‑pipeline notification preferences** — a *Configure* section (email/Teams/recipients/webhook) that persists intent now; delivery ships in a future release.
 - 🧩 **`askInteractive` step** — a durable pipeline step that returns the chosen id (or free text), throws on abort, and times out on SLA.
 - 🌐 **Versioned REST API** — `GET/POST` JSON under `/interactive-input/api/v1/`, permission‑checked, CSRF‑protected, with a stable envelope.
 - 🌉 **`inputStepBridge`** — opt‑in reconciliation that mirrors *existing* native `input` steps into the bell/modal/API, forwarding answers back to the native step. Zero pipeline changes.
@@ -183,8 +192,8 @@ Base path: `/interactive-input/api/v1/`. All responses are JSON. Mutating endpoi
 | Method | Path | Permission | Purpose |
 |---|---|---|---|
 | `GET` | `/health` | anonymous | Liveness probe: `{"status":"ok","pending":N}`. |
-| `GET` | `/questions` | Overall/Read | Questions **you** can answer. `?all=true` ⇒ every waiting question (**Overall/Administer**). |
-| `GET` | `/questions/{id}` | Item/Read on source job | Full detail incl. sanitised `contextHtml` (404 if missing *or* unreadable — no existence leak). |
+| `GET` | `/questions` | Overall/Read | Questions **you** can answer. `?job=<fullName>` ⇒ that job's answerable questions (per‑project centre; Item/Read, 404 otherwise). `?job=<fullName>&build=<n>` ⇒ that build's questions incl. settled ones and the recorded answer (audit). `?all=true` ⇒ every waiting question (**Overall/Administer**). |
+| `GET` | `/questions/{id}` | Item/Read on source job | Full detail incl. sanitised `contextHtml` and `startedBy` (404 if missing *or* unreadable — no existence leak). |
 | `POST` | `/questions/{id}/answer` | Item/Build (or submitter) | Submit `{"choiceId":"…"}` or `{"freeText":"…"}`. |
 | `POST` | `/questions/{id}/abort` | Item/Build (or submitter) | Cancel the input (delivers an abort to the pipeline). |
 | `POST` | `/preview` | Overall/Read | Render Markdown → safe HTML (used by the modal's free‑text preview). |
@@ -224,30 +233,51 @@ Turn on **`inputStepBridge`** and every *pending native `input`* is mirrored int
 
 This is the fastest way to get notifications for pipelines you don't want to rewrite.
 
+### Stage View / Pipeline Graph View "input required" cell
+
+The **Pipeline Stage View** and **Pipeline Graph View** render their built‑in "paused for input" prompt off the native `input` step's `InputAction`. Because the bridge mirrors **real** native `input` steps (rather than replacing them), that indicator keeps working exactly as before — and the same pause now *also* surfaces in the bell, the job‑page box and the build‑history badge. So the recommended way to get an "input needed" marker **in the stage/graph view** is:
+
+- Use a native `input` step with **`inputStepBridge` on** → the stage/graph view shows the standard input‑required cell *and* our surfaces mirror it.
+- Use **`askInteractive`** when you want the richer surface (Markdown context, per‑choice rationale, SLA, REST answering) → it advertises the pause through the job‑page box, the build‑history badge (both pulsing), the sidebar page, the bell, and the anchored console link. `askInteractive` does not draw the native stage‑view cell, because that cell is owned by the core `input`/stage‑view plumbing.
+
 ---
 
 ## Configuration (UI + JCasC)
 
-**Manage Jenkins → System → Interactive Input**, or as code under `unclassified.interactiveInput`:
+Settings are split in two, following Jenkins core guidance to keep look‑and‑feel out of functional config:
+
+- **Functional flags** live under **Manage Jenkins → System → Interactive Input** (`unclassified.interactiveInput`).
+- **Notification‑surface visibility** (the global bell + its scoping, the per‑project centre, the job‑page box, and the icon) lives under **Manage Jenkins → Appearance → Interactive Input** (`appearance.interactiveInputAppearance`).
 
 ```yaml
 unclassified:
   interactiveInput:
     features:
       askInteractiveStep: true   # the askInteractive step
-      navBarBell: true           # the notification bell
       richModal: true            # rich modal (else deep-link to the build)
       restApi: true              # /interactive-input/api/v1/**
       inputStepBridge: false     # surface existing native input steps (opt-in)
       dashboardTile: false       # reserved for v0.2
     polling:
-      intervalSeconds: 15        # bell poll cadence (min 5)
+      intervalSeconds: 15        # poll cadence for the bell and per-project widgets (min 5)
     sla:
       defaultMinutes: 0          # default SLA when a step omits slaMinutes (0 = no SLA)
     retentionDays: 7             # keep answered/aborted/expired questions this long
+
+# Look-and-feel — Manage Jenkins → Appearance → Interactive Input
+appearance:
+  interactiveInputAppearance:
+    notificationCentre: false          # global header bell (off by default). On dashboard = all
+                                       # answerable questions; inside a pipeline = only that pipeline's.
+    perProjectCentre: true             # per-project surfaces (sidebar page, build badge, audit view)
+    jobPageBox: true                   # the large inline box on the job page (independent of the badge)
+    icon: "chatbubble-ellipses"        # one of: chatbubble-ellipses, hand-left, person-circle,
+                                       # git-pull-request, megaphone, hourglass, alert-circle, notifications
 ```
 
-Defaults: the step, bell, modal, and REST API are **on**; the bridge and dashboard tile are **off**.
+Defaults: the step, **per‑project notification centre**, the **job‑page box**, the modal, and the REST
+API are **on**; the global bell (`notificationCentre`), the bridge, and the dashboard tile are **off**.
+Per‑pipeline notification preferences live on each pipeline's **Configure** page (saved now; delivery later).
 
 ---
 

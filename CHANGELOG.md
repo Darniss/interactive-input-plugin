@@ -6,7 +6,72 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+- **Per-project notification centre** — notifications now surface per pipeline/build instead of only
+  at one Jenkins-wide point:
+  - `InteractiveInputJobAction` (`TransientActionFactory<Job>`) — an inline box on the job/pipeline
+    page (`jobMain.jelly`) plus a sidebar page (`index.jelly`) listing that job's pending questions;
+    the link/box appear only when something is pending.
+  - `InteractiveInputRunAction` (`BuildBadgeAction`, `TransientActionFactory<Run>`) — an "awaiting
+    input" badge in the build-history list while a build waits, and a per-build **audit view** showing
+    what was displayed and what was chosen. Attached only to builds that used interactive-input.
+  - REST scoping: `GET /questions?job=<fullName>` (per-project, `Item.READ`, 404 no-leak) and
+    `?job=<fullName>&build=<n>` (per-build audit incl. the recorded answer).
+- **Attribution** — `Question.startedBy` (resolved via `CauseResolver`: user id, else
+  `scm`/`timer`/`upstream`/`system`) is populated by the step and the bridge, exposed in the REST JSON,
+  and rendered as "started by &lt;user&gt;" on every surface.
+- **Anchored console audit link** — the `askInteractive` step logs a `HyperlinkNote` to the per-build
+  audit view at invocation (like the built-in `input`), marks the flow node **Paused**
+  (`PauseAction`), and logs the resolved outcome (answered/aborted/expired, by whom, and what was
+  chosen).
+- **Per-pipeline notification preferences** — `InteractiveInputJobProperty` (`OptionalJobProperty`)
+  adds an *Interactive Input notifications* section to a pipeline's **Configure** page (email/Teams/
+  recipients/webhook). Preferences are **persisted only**; delivery ships in a future release.
+- **Appearance configuration** — new `InteractiveInputAppearanceConfig` (`GlobalConfiguration` in the
+  `AppearanceCategory`) surfaces under **Manage Jenkins → Appearance → Interactive Input**, and as code
+  under `appearance.interactiveInputAppearance`. It holds three independent on/off switches and an icon
+  chooser:
+  - `notificationCentre` (default **off**) — the global header bell, now **context-scoped**: the
+    dashboard lists every answerable question; inside a pipeline (job/build page) it narrows to that
+    pipeline's questions (server-side `NotificationBell` resolves the `Job` ancestor and the client
+    calls `GET /questions?job=<fullName>`).
+  - `perProjectCentre` (default **on**) — gates the per-project surfaces (migrated here from `features`).
+  - `jobPageBox` (default **on**) — independently toggles the large inline box on the job page, so the
+    badge + sidebar can be kept without the box.
+  - `icon` (default `chatbubble-ellipses`) — the notification icon used across the bell, badge and
+    sidebar, chosen from eight meaning-matched Ionicons (`ionicons-api`).
+- **Attention pulse** — the build-history "awaiting input" badge and the job-page box title blink
+  slowly in red (`@keyframes ii-attn-pulse`), with a `prefers-reduced-motion` fallback.
+
+### Changed
+- **Notification-surface settings moved from `features` to Appearance.** `navBarBell` (now
+  `notificationCentre`) and `perProjectCentre` are no longer functional feature flags; they live under
+  **Appearance** per Jenkins core guidance to separate look-and-feel from functional config. The
+  functional `features` block keeps `askInteractiveStep`, `richModal`, `restApi`, `inputStepBridge`,
+  `dashboardTile`.
+- The global bell, when enabled, is anchored into the header controls (with a bottom-right floating
+  fallback) so it no longer overlaps the settings gear.
+- The rich modal's **context panel is expanded by default**.
+- Notification icons now render via `ionicons-api` `<l:icon>` (theme-aware) instead of a hardcoded SVG.
+- `bell.js` refactored into a shared client (helpers + modal + answer/preview) reused by the bell and
+  the per-project job/audit widgets; the bell clones the operator-chosen icon and scopes its query to
+  the current pipeline.
+
+### Fixed
+- **Build-history badge now blinks everywhere.** The "awaiting input" badge (`badge.jelly`) pulls in the
+  shared style adjunct itself, so the slow red attention pulse and icon sizing render in the build list
+  even when both the header bell (`notificationCentre`) and the job-page box (`jobPageBox`) are off —
+  previously the badge relied on one of those surfaces to have loaded `bell.css`, so with both off it
+  rendered unstyled and did not pulse. Adjunct includes are idempotent, so no double-load. This applies
+  to every waiting build, including native `input` builds surfaced by `inputStepBridge`.
+
+### Notes / trade-offs
+- The durable audit record is the build console line; the per-build audit *page* is a live view of the
+  store and shows an empty state after retention compaction.
+- **Stage View / Pipeline Graph View "input required" cell** is owned by the core `input`/stage-view
+  plumbing (keyed off `InputAction`). With `inputStepBridge` on, native `input` steps keep that cell
+  *and* mirror into our surfaces. `askInteractive` advertises its pause through our own surfaces (box,
+  pulsing badge, sidebar, bell, anchored console link) rather than drawing the native cell.
 
 ## [0.1.0] - 2026-07-19
 
