@@ -3,7 +3,6 @@ package io.jenkins.plugins.interactiveinput.ui;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
-import hudson.model.FreeStyleProject;
 import io.jenkins.plugins.interactiveinput.config.InteractiveInputAppearanceConfig;
 import io.jenkins.plugins.interactiveinput.model.Question;
 import io.jenkins.plugins.interactiveinput.store.QuestionStore;
@@ -24,8 +23,12 @@ import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
  * The fix snapshots per-question drafts before navigating and restores them, rendering each slide from
  * the already-fetched list item instead of re-fetching.
  *
- * <p>Drives the real UI in HtmlUnit: open the bell, click "Answer all", type into slide 1, page to
- * slide 2 and back, and assert the draft survived.
+ * <p>Drives the real UI in HtmlUnit through the <em>only</em> remaining entry point to the series pager:
+ * a build-history badge for a single build that has more than one waiting question. (The "Answer all"
+ * button was removed — it was never requested.) The badge is normally emitted by the async build-history
+ * widget, which is out of scope here, so the test injects one and clicks it; the click is handled by the
+ * document-level delegated handler exactly as it is for a real badge. It then types into slide 1, pages to
+ * slide 2 and back, and asserts the draft survived.
  */
 @WithJenkins
 class SeriesDraftRetentionTest {
@@ -37,13 +40,15 @@ class SeriesDraftRetentionTest {
     void freeTextDraftSurvivesPagingBetweenSeriesQuestions(JenkinsRule j) throws Exception {
         InteractiveInputAppearanceConfig cfg = InteractiveInputAppearanceConfig.get();
         assertNotNull(cfg, "appearance config must be registered");
-        cfg.setNotificationCentre(true); // the global bell is off by default
+        // Turning the centre on guarantees a config mount (the bell) so bell.js discovers rootUrl; the
+        // series pager itself is reached via the injected badge, not the bell.
+        cfg.setNotificationCentre(true);
 
         j.createFreeStyleProject(JOB);
         QuestionStore store = QuestionStore.get();
         long now = System.currentTimeMillis();
-        // Two free-text questions (no starter => visible to everyone) so any slide shows a textarea and
-        // "Answer all (2)" offers the series pager.
+        // Two free-text questions (no starter => visible/answerable to everyone) on the SAME build, so the
+        // build badge opens the series pager and every slide shows a textarea.
         store.submit(new Question("s1", "Deploy note (free text)?", List.of(), true, 0L, null, null, JOB, 1, null, now, false));
         store.submit(new Question("s2", "Rollback note (free text)?", List.of(), true, 0L, null, null, JOB, 1, null, now, false));
 
@@ -53,12 +58,15 @@ class SeriesDraftRetentionTest {
             wc.getOptions().setThrowExceptionOnFailingStatusCode(false);
 
             HtmlPage page = wc.goTo("");
-            wc.waitForBackgroundJavaScript(3000); // let the bell's first poll populate its cache
+            wc.waitForBackgroundJavaScript(3000); // let bell.js boot (DOMContentLoaded) + discover rootUrl
 
-            ((HtmlElement) page.querySelector(".ii-bell-btn")).click();
-            HtmlElement answerAll = (HtmlElement) page.querySelector(".ii-answer-all");
-            assertNotNull(answerAll, "the bell must offer 'Answer all' for two waiting questions");
-            answerAll.click();
+            // Inject the build-history badge for build #1 and click it. The delegated click handler
+            // (document-level, wired unconditionally) routes to openBadge, which opens the series pager
+            // because the build has more than one waiting question.
+            page.executeJavaScript("var a=document.createElement('a');a.id='ii-test-badge';"
+                    + "a.setAttribute('data-ii-badge','');a.setAttribute('data-job','" + JOB + "');"
+                    + "a.setAttribute('data-build','1');document.body.appendChild(a);");
+            ((HtmlElement) page.querySelector("#ii-test-badge")).click();
             wc.waitForBackgroundJavaScript(2000);
 
             HtmlTextArea slide1 = (HtmlTextArea) page.querySelector(".ii-modal .ii-freetext textarea");

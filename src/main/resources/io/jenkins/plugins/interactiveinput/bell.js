@@ -549,8 +549,8 @@
   // ================================ series pager ================================
   // A single modal that pages through a *series* of questions with numbered navigation (‹ 2 / 5 ›
   // plus clickable numbered pips). Answering advances to the next still-waiting question in place;
-  // already-answered ones render read-only so you can review what was chosen. Used by the bell's and
-  // the job box's "Answer all (N)" affordance and by a build with more than one waiting question.
+  // already-answered ones render read-only so you can review what was chosen. Opened from a build's
+  // history badge when that single build (e.g. an agent) has more than one waiting question.
   function buildSeriesNav(ctx) {
     var nav = el("div", { cls: "ii-series-nav" });
     var row = el("div", { cls: "ii-series-row" });
@@ -791,19 +791,6 @@
         dropdown.appendChild(el("div", { cls: "ii-empty", text: "Nothing waiting for you right now." }));
         return;
       }
-      // With more than one waiting, offer a single "Answer all" pager that slides through them.
-      if (questionsCache.length >= 2) {
-        var all = el("button", {
-          cls: "ii-answer-all",
-          text: "Answer all (" + questionsCache.length + ")",
-          attrs: { type: "button" }
-        });
-        all.addEventListener("click", function () {
-          toggleDropdown(false);
-          openSeries(questionsCache, { richModal: richModal, onDone: refresh });
-        });
-        dropdown.appendChild(all);
-      }
       var list = el("ul", { cls: "ii-list", attrs: { role: "none" } });
       questionsCache.slice(0, 10).forEach(function (q) {
         var item = el("li", { attrs: { role: "none" } });
@@ -850,7 +837,7 @@
   }
 
   // ================================ per-project widgets ================================
-  function mountListWidget(mount, url, rowFactory, emptyText, seriesOpts) {
+  function mountListWidget(mount, url, rowFactory, emptyText) {
     var listWrap = el("div", { cls: "ii-widget" });
     mount.appendChild(listWrap);
 
@@ -859,18 +846,6 @@
       if (!questions.length) {
         listWrap.appendChild(el("div", { cls: "ii-empty", text: emptyText }));
         return;
-      }
-      // When answering is possible (job box) and more than one is waiting, offer the series pager.
-      if (seriesOpts && questions.length >= 2) {
-        var all = el("button", {
-          cls: "ii-answer-all",
-          text: "Answer all (" + questions.length + ")",
-          attrs: { type: "button" }
-        });
-        all.addEventListener("click", function () {
-          openSeries(questions, { richModal: seriesOpts.richModal, onDone: refresh });
-        });
-        listWrap.appendChild(all);
       }
       var ul = el("ul", { cls: "ii-list" });
       questions.forEach(function (q) {
@@ -912,8 +887,7 @@
           openQuestion(q, { richModal: richModal, onDone: refresh });
         });
       },
-      "All caught up — nothing waiting.",
-      { richModal: richModal }
+      "All caught up — nothing waiting."
     );
   }
 

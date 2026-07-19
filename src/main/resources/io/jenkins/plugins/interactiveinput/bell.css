@@ -524,31 +524,6 @@
   cursor: default;
 }
 
-/* ---- "Answer all" affordance (bell dropdown + job box) ---- */
-.ii-answer-all {
-  display: block;
-  width: calc(100% - 20px);
-  margin: 10px;
-  padding: 8px 12px;
-  border: 1px solid var(--btn-primary-bg, #4a90d9);
-  border-radius: 6px;
-  background: var(--btn-primary-bg, #4a90d9);
-  color: var(--btn-primary-color, #fff);
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
-  text-align: center;
-}
-
-.ii-answer-all:hover {
-  filter: brightness(1.05);
-}
-
-.ii-answer-all:focus-visible {
-  outline: 2px solid var(--focus-input-border, #4a90d9);
-  outline-offset: 2px;
-}
-
 /* ---- series pager (numbered slide-through of a series of questions) ---- */
 .ii-series-nav {
   margin: 0 0 14px;
