@@ -88,6 +88,23 @@ All notable changes to this project are documented here. The format follows
   longer stays stale until a full page reload.
 
 ### Fixed
+- **Notification bell now appears inside a pipeline/job, not only on the dashboard.** The shared
+  `bell.js` adjunct is emitted by `jobMain.jelly` in the job page's *main panel* — earlier in the
+  document than the footer bell mount (`#interactive-input-bell`, a `PageDecorator`) and the sidebar
+  `[data-ii-tasklink]` controller. The script collected its mounts at top-level execution, so on a job
+  page those elements did not exist yet and neither the bell nor the live sidebar controller mounted
+  (on the dashboard there is no `jobMain.jelly`, so it worked). Mount discovery + bootstrap now run on
+  `DOMContentLoaded`, so every surface mounts regardless of where the adjunct is emitted.
+- **Left-sidebar "Interactive Input (N)" count updates live.** Two causes: the poller
+  (`mountTaskLink`) never ran on job pages (same bootstrap-timing bug above), and its href match was
+  exact while core renders the link *without* a trailing slash (`…/interactive-input`) — so even when
+  it ran it failed to find the existing link and cloned a duplicate. The match is now
+  slash-insensitive (`normPath`), and the count re-labels / the row hides live on answer (via the poll
+  and the `ii:answered` event) without a page reload.
+- **Series ("Answer all") modal no longer loses a half-typed answer.** Paging between questions
+  re-fetched each one and rebuilt the form empty, discarding unsubmitted free text / the selected
+  choice. The pager now snapshots a per-question **draft** before navigating and restores it, rendering
+  each slide from the already-fetched list item instead of re-fetching.
 - **Stale ("dummy") bridged notifications now clear promptly.** When a native `input` (surfaced by
   `inputStepBridge`) was answered through the built-in console/stage-view UI, our mirror stayed WAITING
   — showing a stale entry in the bell and a stale build-list badge — until the next 30s ticker

@@ -21,10 +21,15 @@
     return Array.prototype.slice.call(nodeList || []);
   }
 
-  var bellMount = document.getElementById("interactive-input-bell");
-  var widgetMounts = toArray(document.querySelectorAll("[data-ii-widget]"));
-  var auditMounts = toArray(document.querySelectorAll("[data-ii-audit]"));
-  var taskLinkMounts = toArray(document.querySelectorAll("[data-ii-tasklink]"));
+  // Mounts are discovered on DOM ready (see boot()), NOT here. On a job/pipeline page this adjunct is
+  // emitted by jobMain.jelly in the MAIN PANEL — i.e. BEFORE the sidebar [data-ii-tasklink] controller
+  // (its next sibling) and the footer #interactive-input-bell are parsed. Querying at script-execution
+  // time therefore misses them, which is why the bell was absent inside a job and the sidebar "(N)"
+  // count never updated live. Discovering after the DOM is parsed fixes both without touching layout.
+  var bellMount = null;
+  var widgetMounts = [];
+  var auditMounts = [];
+  var taskLinkMounts = [];
   // No early return when there are no mounts: build-history badges ([data-ii-badge]) are injected
   // lazily by the async build-history widget, so they may not exist yet at load. A delegated click
   // handler (wired at the bottom) covers them; the polling mounts are still set up conditionally.
@@ -35,11 +40,13 @@
     var v = node ? node.getAttribute(name) : null;
     return v == null ? dflt : v;
   }
-  var cfgSrc = bellMount || widgetMounts[0] || auditMounts[0] || taskLinkMounts[0];
-  var rootUrl = (attr(cfgSrc, "data-root-url", "") || "").replace(/\/$/, "");
+  // Shared config, (re)computed from the first mount present once the DOM is ready (see discover()).
+  // Safe defaults keep the delegated badge handler usable on a badge-only page before discovery runs.
+  var cfgSrc = null;
+  var rootUrl = "";
   var apiBase = rootUrl + "/interactive-input/api/v1";
-  var richModalDefault = attr(cfgSrc, "data-rich-modal", "true") === "true";
-  var pollSeconds = Math.max(5, parseInt(attr(cfgSrc, "data-poll-seconds", "15"), 10) || 15);
+  var richModalDefault = true;
+  var pollSeconds = 15;
 
   // When the only surface on the page is a build-history badge (no mount to read config from), adopt
   // the origin from the clicked badge's data-root-url so API calls resolve under any context path.
@@ -337,13 +344,23 @@
     var form = el("form", { cls: "ii-form" });
     var selectedChoice = { id: null };
 
+    // In a series the caller passes opts.initial to restore a half-finished answer (draft) when the
+    // user pages back to this question; otherwise the first choice is pre-selected as before.
+    var initialChoiceId = opts.initial ? opts.initial.choiceId : null;
+    var hasInitialChoice = false;
+    if (initialChoiceId && q.choices) {
+      hasInitialChoice = q.choices.some(function (c) {
+        return c.id === initialChoiceId;
+      });
+    }
+
     if (q.choices && q.choices.length) {
       var fieldset = el("fieldset", { cls: "ii-choices" });
       fieldset.appendChild(el("legend", { text: "Choose an option" }));
       q.choices.forEach(function (c, idx) {
         var row = el("label", { cls: "ii-choice" });
         var radio = el("input", { attrs: { type: "radio", name: "ii-choice", value: c.id } });
-        if (idx === 0) {
+        if (hasInitialChoice ? c.id === initialChoiceId : idx === 0) {
           radio.checked = true;
           selectedChoice.id = c.id;
         }
@@ -372,6 +389,10 @@
       freeTextArea = el("textarea", {
         attrs: { id: "ii-ft-" + q.id, rows: "3", "aria-label": "Free-text answer" }
       });
+      // Restore a series draft so text typed before paging away is not lost.
+      if (opts.initial && opts.initial.freeText) {
+        freeTextArea.value = opts.initial.freeText;
+      }
       var preview = el("div", { cls: "ii-preview", attrs: { "aria-live": "polite" } });
       var previewTimer = null;
       freeTextArea.addEventListener("input", function () {
@@ -444,7 +465,7 @@
               closeModal();
             }
             announceAnswered(q);
-            onDone();
+            onDone(payload);
           } else {
             fail((r.body && r.body.message) || "Failed (HTTP " + r.status + ")");
           }
@@ -580,7 +601,24 @@
       return;
     }
     var answered = {};
+    // Per-question drafts (unsubmitted free text / selected choice), keyed by question id, so paging
+    // between slides no longer discards what the user typed. The list items already carry full detail
+    // (prompt/choices/allowFreeText/contextHtml/canAnswer) from the list endpoint, so slides render
+    // straight from them — the previous per-navigation re-fetch is what rebuilt the form empty and
+    // dropped the draft.
+    var drafts = {};
     var ctx = { list: list, index: 0, answered: answered };
+
+    // Snapshot the current slide's in-progress answer before we navigate away from it.
+    function captureDraft() {
+      var q = list[ctx.index];
+      if (!q || answered[q.id] || !activeModal) {
+        return;
+      }
+      var ta = activeModal.querySelector(".ii-freetext textarea");
+      var radio = activeModal.querySelector('input[name="ii-choice"]:checked');
+      drafts[q.id] = { freeText: ta ? ta.value : "", choiceId: radio ? radio.value : null };
+    }
 
     function render(q) {
       var isDone = !!answered[q.id] || (q.status && q.status !== "WAITING");
@@ -592,8 +630,16 @@
         renderForm(modal, q, {
           keepOpen: true,
           richModal: opts.richModal,
-          onDone: function () {
+          initial: drafts[q.id],
+          onDone: function (payload) {
             answered[q.id] = true;
+            delete drafts[q.id];
+            // Reflect the just-submitted answer on the cached item so paging back to this slide shows
+            // its outcome read-only without another round-trip.
+            q.status = "ANSWERED";
+            q.answer = { answeredBy: "you", answeredTs: Date.now() };
+            if (payload && payload.choiceId) q.answer.choiceId = payload.choiceId;
+            if (payload && payload.freeText) q.answer.freeText = payload.freeText;
             ctx.next();
           }
         });
@@ -601,20 +647,11 @@
       replaceModal(modal);
     }
 
-    function load(q) {
-      fetchJson(apiBase + "/questions/" + encodeURIComponent(q.id))
-        .then(function (r) {
-          render(r.ok ? r.body : q);
-        })
-        .catch(function () {
-          render(q);
-        });
-    }
-
     ctx.goTo = function (i) {
       if (i < 0 || i >= list.length) return;
+      captureDraft();
       ctx.index = i;
-      load(list[i]);
+      render(list[i]);
     };
     ctx.next = function () {
       for (var i = ctx.index + 1; i < list.length; i++) {
@@ -911,12 +948,19 @@
     var expectedHref = jobUrl + "interactive-input/";
     var url = apiBase + "/questions?job=" + encodeURIComponent(job);
 
+    // Compare hrefs by path only, ignoring the origin and any trailing slash. Core renders this link
+    // WITHOUT a trailing slash (…/interactive-input) while we build expectedHref WITH one; an exact
+    // match therefore fails and would make apply() clone a duplicate sidebar row. Normalising both
+    // sides fixes the match without matching a build's link (…/<n>/interactive-input).
+    function normPath(href) {
+      return href.replace(/^https?:\/\/[^/]+/, "").replace(/\/+$/, "");
+    }
+    var expectedPath = normPath(expectedHref);
+
     function findLink() {
       var anchors = document.querySelectorAll("#tasks a[href], #side-panel a[href], .task a[href]");
       for (var i = 0; i < anchors.length; i++) {
-        var href = anchors[i].getAttribute("href") || "";
-        // Match the job's own interactive-input link, not a build's (…/<n>/interactive-input/).
-        if (href === expectedHref || href.replace(/^https?:\/\/[^/]+/, "") === expectedHref) {
+        if (normPath(anchors[i].getAttribute("href") || "") === expectedPath) {
           return anchors[i];
         }
       }
@@ -1097,14 +1141,38 @@
   });
 
   // ----- bootstrap -----
-  // Badge clicks are handled by delegation above and need no mount. The polling surfaces (bell, job
-  // widgets, audit widgets) are only set up when their mount is present.
-  if (bellMount || widgetMounts.length || auditMounts.length || taskLinkMounts.length) {
-    ensureCrumb().then(function () {
-      if (bellMount) mountBell(bellMount);
-      widgetMounts.forEach(mountJobWidget);
-      auditMounts.forEach(mountAuditWidget);
-      taskLinkMounts.forEach(mountTaskLink);
-    });
+  // Discover the mounts + shared config from the DOM, then wire the polling surfaces. Deferred to DOM
+  // ready because on a job page this adjunct is emitted in the main panel, BEFORE the footer bell and
+  // the sidebar tasklink controller exist (see the note near the top). Running before they are parsed
+  // is exactly what left the bell missing inside a job and the sidebar count stale. Badge clicks are
+  // handled by delegation above and need no mount.
+  function discover() {
+    bellMount = document.getElementById("interactive-input-bell");
+    widgetMounts = toArray(document.querySelectorAll("[data-ii-widget]"));
+    auditMounts = toArray(document.querySelectorAll("[data-ii-audit]"));
+    taskLinkMounts = toArray(document.querySelectorAll("[data-ii-tasklink]"));
+    cfgSrc = bellMount || widgetMounts[0] || auditMounts[0] || taskLinkMounts[0];
+    rootUrl = (attr(cfgSrc, "data-root-url", "") || "").replace(/\/$/, "");
+    apiBase = rootUrl + "/interactive-input/api/v1";
+    richModalDefault = attr(cfgSrc, "data-rich-modal", "true") === "true";
+    pollSeconds = Math.max(5, parseInt(attr(cfgSrc, "data-poll-seconds", "15"), 10) || 15);
+  }
+
+  function boot() {
+    discover();
+    if (bellMount || widgetMounts.length || auditMounts.length || taskLinkMounts.length) {
+      ensureCrumb().then(function () {
+        if (bellMount) mountBell(bellMount);
+        widgetMounts.forEach(mountJobWidget);
+        auditMounts.forEach(mountAuditWidget);
+        taskLinkMounts.forEach(mountTaskLink);
+      });
+    }
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", boot);
+  } else {
+    boot();
   }
 })();
