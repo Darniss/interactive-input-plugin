@@ -67,6 +67,33 @@ class QuestionStorePermissionsSlaTest {
     }
 
     @Test
+    void scopedQueriesFilterByJobAndBuildAndPermission(JenkinsRule j) throws Exception {
+        secure(j);
+        j.createFreeStyleProject("other-job");
+        QuestionStore store = QuestionStore.get();
+        store.submit(question("s1", null, 0L, System.currentTimeMillis())); // JOB #1
+        store.submit(questionForBuild("s2", 2)); // JOB #2
+        store.submit(new Question(
+                "s3", "prompt", List.of(new Choice("a", "A")), false, 0L, null, null, "other-job", 1, "tester",
+                System.currentTimeMillis(), false));
+
+        as("builder", () -> {
+            assertEquals(2, store.listAnswerableForJob(JOB).size(), "two questions on JOB");
+            assertEquals(2, store.countAnswerableForJob(JOB));
+            assertEquals(1, store.listAnswerableForJob("other-job").size(), "scoped to the other job");
+            assertEquals(1, store.listForBuild(JOB, 1).size());
+            assertEquals(1, store.listForBuild(JOB, 2).size());
+            assertTrue(store.hasWaitingForBuild(JOB, 1));
+            assertTrue(store.hasAnyForBuild(JOB, 2));
+            assertFalse(store.hasWaitingForBuild(JOB, 3), "no question for build 3");
+        });
+        as("reader", () -> {
+            assertEquals(0, store.countAnswerableForJob(JOB), "reader cannot answer");
+            assertEquals(2, store.listReadableForJob(JOB).size(), "reader can view both on JOB");
+        });
+    }
+
+    @Test
     void expireOverdueMarksExpired(JenkinsRule j) throws Exception {
         secure(j);
         QuestionStore store = QuestionStore.get();
@@ -108,8 +135,14 @@ class QuestionStorePermissionsSlaTest {
 
     private static Question question(String id, String submitterFilter, long slaMs, long createdTs) {
         return new Question(
-                id, "prompt", List.of(new Choice("a", "A")), false, slaMs, null, submitterFilter, JOB, 1, createdTs,
-                false);
+                id, "prompt", List.of(new Choice("a", "A")), false, slaMs, null, submitterFilter, JOB, 1, "tester",
+                createdTs, false);
+    }
+
+    private static Question questionForBuild(String id, int build) {
+        return new Question(
+                id, "prompt", List.of(new Choice("a", "A")), false, 0L, null, null, JOB, build, "tester",
+                System.currentTimeMillis(), false);
     }
 
     @FunctionalInterface

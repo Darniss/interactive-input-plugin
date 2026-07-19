@@ -15,7 +15,11 @@ import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
 /**
  * JCasC round-trip (§7.3, §8.8): loading the documented YAML must wire the extensions, and exporting
- * must reproduce the configured values under the {@code interactiveInput} symbol.
+ * must reproduce the configured values. Functional flags live under the {@code interactiveInput}
+ * symbol (unclassified); appearance surfaces live under {@code appearance.interactiveInputAppearance}
+ * (the {@code AppearanceCategory} root — verified against JCasC's
+ * {@code GlobalConfigurationCategoryConfigurator}, which strips the {@code Category} suffix and
+ * lower-cases the category class name when it has no {@code @Symbol}).
  */
 @WithJenkins
 class JcascRoundTripTest {
@@ -37,6 +41,18 @@ class JcascRoundTripTest {
     }
 
     @Test
+    void loadsAppearanceFromYaml(JenkinsRule j) throws Exception {
+        ConfigurationAsCode.get().configure(resource("jcasc-interactive-input.yml"));
+
+        InteractiveInputAppearanceConfig a = InteractiveInputAppearanceConfig.get();
+        assertNotNull(a);
+        assertTrue(a.isNotificationCentre(), "notificationCentre enabled in YAML");
+        assertTrue(a.isPerProjectCentre());
+        assertFalse(a.isJobPageBox(), "jobPageBox disabled in YAML");
+        assertEquals("hand-left", a.getIcon());
+    }
+
+    @Test
     void exportsConfiguredValues(JenkinsRule j) throws Exception {
         ConfigurationAsCode.get().configure(resource("jcasc-interactive-input.yml"));
 
@@ -44,6 +60,10 @@ class JcascRoundTripTest {
         assertTrue(exported.contains("interactiveInput"), () -> "export missing symbol:\n" + exported);
         assertTrue(exported.contains("inputStepBridge: true"), () -> "export missing bridge flag:\n" + exported);
         assertTrue(exported.contains("intervalSeconds: 30"), () -> "export missing polling:\n" + exported);
+        assertTrue(
+                exported.contains("interactiveInputAppearance"),
+                () -> "export missing appearance block:\n" + exported);
+        assertTrue(exported.contains("hand-left"), () -> "export missing configured icon:\n" + exported);
     }
 
     private static String resource(String name) {

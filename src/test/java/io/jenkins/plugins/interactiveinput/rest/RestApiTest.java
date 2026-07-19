@@ -73,6 +73,51 @@ class RestApiTest {
     }
 
     @Test
+    void scopedListByJobFiltersChecksItemReadAndExposesStartedBy(JenkinsRule j) throws Exception {
+        secure(j);
+        submit("q1");
+
+        // builder can answer -> the job's answerable list has 1, and startedBy is exposed.
+        WebResponse builderResp = get(j.createWebClient().login("builder"), j, BASE + "questions?job=" + JOB);
+        assertEquals(200, builderResp.getStatusCode());
+        assertEquals(1, json(builderResp).getInt("count"));
+        JSONObject q0 = json(builderResp).getJSONArray("questions").getJSONObject(0);
+        assertEquals("tester", q0.getString("startedBy"));
+
+        // reader has Item.READ but not Item.BUILD -> answerable-for-job is empty.
+        WebResponse readerResp = get(j.createWebClient().login("reader"), j, BASE + "questions?job=" + JOB);
+        assertEquals(200, readerResp.getStatusCode());
+        assertEquals(0, json(readerResp).getInt("count"));
+
+        // Unknown job -> 404 (never reveal existence).
+        assertEquals(404, get(j.createWebClient().login("builder"), j, BASE + "questions?job=does-not-exist").getStatusCode());
+
+        // Overall/Read but no Item.READ on the job -> 404 (no leak).
+        assertEquals(404, get(j.createWebClient().login("outsider"), j, BASE + "questions?job=" + JOB).getStatusCode());
+
+        // No Overall/Read at all -> 403 at the endpoint gate.
+        assertEquals(403, get(j.createWebClient(), j, BASE + "questions?job=" + JOB).getStatusCode());
+    }
+
+    @Test
+    void buildScopedAuditIncludesAnswer(JenkinsRule j) throws Exception {
+        secure(j);
+        submit("q1");
+        assertEquals(200, postJson(j.createWebClient().login("builder"), j, BASE + "questions/q1/answer", "{\"choiceId\":\"yes\"}"));
+
+        WebResponse audit = get(j.createWebClient().login("builder"), j, BASE + "questions?job=" + JOB + "&build=1");
+        assertEquals(200, audit.getStatusCode());
+        JSONObject body = json(audit);
+        assertEquals(1, body.getInt("count"), "settled question still visible in the per-build audit");
+        JSONObject q0 = body.getJSONArray("questions").getJSONObject(0);
+        assertEquals("ANSWERED", q0.getString("status"));
+        assertEquals("yes", q0.getJSONObject("answer").getString("choiceId"));
+
+        // A non-numeric build is rejected.
+        assertEquals(400, get(j.createWebClient().login("builder"), j, BASE + "questions?job=" + JOB + "&build=x").getStatusCode());
+    }
+
+    @Test
     void detailHiddenWithoutItemRead(JenkinsRule j) throws Exception {
         secure(j);
         submit("q1");
@@ -105,7 +150,8 @@ class RestApiTest {
     private static void secure(JenkinsRule j) throws Exception {
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         MockAuthorizationStrategy auth = new MockAuthorizationStrategy();
-        auth.grant(Jenkins.READ).everywhere().to("reader", "builder", "admin");
+        // "outsider" has Overall/Read but no Item.READ, to exercise the scoped-endpoint no-leak 404.
+        auth.grant(Jenkins.READ).everywhere().to("reader", "builder", "admin", "outsider");
         auth.grant(Item.READ).everywhere().to("reader", "builder");
         auth.grant(Item.BUILD).everywhere().to("builder");
         auth.grant(Jenkins.ADMINISTER).everywhere().to("admin");
@@ -116,7 +162,7 @@ class RestApiTest {
     private static void submit(String id) {
         QuestionStore.get()
                 .submit(new Question(
-                        id, "Approve?", List.of(new Choice("yes", "Yes")), false, 0L, null, null, JOB, 1,
+                        id, "Approve?", List.of(new Choice("yes", "Yes")), false, 0L, null, null, JOB, 1, "tester",
                         System.currentTimeMillis(), false));
     }
 

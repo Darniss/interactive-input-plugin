@@ -73,7 +73,8 @@ class QuestionModelTest {
         long created = 1_000_000L;
         long slaMs = 60_000L;
         Question q = new Question(
-                "q1", "prompt", List.of(new Choice("a", "A")), false, slaMs, null, null, "job", 1, created, false);
+                "q1", "prompt", List.of(new Choice("a", "A")), false, slaMs, null, null, "job", 1, "tester", created,
+                false);
         assertEquals(created + slaMs, q.getExpiresAt());
         assertFalse(q.isExpired(created + slaMs - 1));
         assertTrue(q.isExpired(created + slaMs));
@@ -97,6 +98,20 @@ class QuestionModelTest {
     }
 
     @Test
+    void startedByExposedAndSerialised() {
+        Question q = new Question(
+                "q1", "prompt", List.of(new Choice("a", "A")), false, 0L, null, null, "job", 7, "alice", 1L, false);
+        assertEquals("alice", q.getStartedBy());
+        assertEquals("alice", q.toJson(false, 2L).getString("startedBy"));
+
+        // Legacy records with no starting user serialise startedBy as an empty string (never null).
+        Question legacy = new Question(
+                "q2", "prompt", List.of(new Choice("a", "A")), false, 0L, null, null, "job", 7, null, 1L, false);
+        assertNull(legacy.getStartedBy());
+        assertEquals("", legacy.toJson(false, 2L).getString("startedBy"));
+    }
+
+    @Test
     void questionJsonIncludesAnswerOnlyWhenRequested() {
         Question q = waiting(0L);
         q.markAnswered(new Answer("q1", "a", null, "alice", 5L));
@@ -111,6 +126,6 @@ class QuestionModelTest {
     private static Question waiting(long slaMs) {
         return new Question(
                 "q1", "prompt", Collections.singletonList(new Choice("a", "A")), false, slaMs, null, null, "job", 1,
-                1L, false);
+                "tester", 1L, false);
     }
 }

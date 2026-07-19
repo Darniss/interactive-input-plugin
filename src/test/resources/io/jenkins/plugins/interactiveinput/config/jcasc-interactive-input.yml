@@ -2,7 +2,6 @@ unclassified:
   interactiveInput:
     features:
       askInteractiveStep: true
-      navBarBell: true
       richModal: true
       restApi: true
       inputStepBridge: true
@@ -12,3 +11,9 @@ unclassified:
     sla:
       defaultMinutes: 5
     retentionDays: 14
+appearance:
+  interactiveInputAppearance:
+    notificationCentre: true
+    perProjectCentre: true
+    jobPageBox: false
+    icon: "hand-left"
