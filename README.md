@@ -196,7 +196,7 @@ Each modal shows the question, a `<job> #<build> · started by <user>` line, and
 
 ### From an AI agent
 
-An autonomous agent (a bot, a script, or an LLM copilot) pauses mid-task and asks a human through the plugin. The six shapes below cover the human loops agents hit in practice. The screenshots are live captures from the bundled demo pipeline ([`sample_ai/Jenkinsfile.scenarios`](sample_ai/Jenkinsfile.scenarios)), where a Cursor-SDK agent drives each shape.
+An autonomous agent (a bot, a script, or an LLM copilot) pauses mid-task and asks a human through the plugin. The six shapes below cover the human loops agents hit in practice. The screenshots are live captures from a demo pipeline where a Cursor-SDK agent drives each shape.
 
 **1. Approve / Deny** — a two-button gate. The agent proposes an action; the human approves or rejects it.
 
@@ -241,7 +241,7 @@ The idea is simple: your AI agent is doing some work, it reaches a point where a
 
 The agent asks by calling a **custom tool** (explained just below). **Cursor SDK is used here as one example only** — the same pattern works with **any** AI agent app or framework, in **any** programming language.
 
-> Full, runnable versions live in [`sample_ai/scenarios_agent.py`](sample_ai/scenarios_agent.py) (the agent + its tools) and [`sample_ai/Jenkinsfile.scenarios`](sample_ai/Jenkinsfile.scenarios) (the pipeline that turns each tool call into an `askInteractive(...)` step). Set `CURSOR_API_KEY`, then run one stage per shape.
+> The snippets below are the essential wiring: an agent that exposes an `ask_human` (and `ask_human_series`) tool, and a pipeline that turns each tool call into an `askInteractive(...)` step. Set `CURSOR_API_KEY`, then run one stage per shape.
 
 ### What is a "custom tool", and how should it look?
 
@@ -253,7 +253,7 @@ For this plugin, a good `ask_human` tool has four parts:
 2. **Description** — tells the model *when* to use it, e.g. *"Ask the human one question and block until they answer."*
 3. **Inputs (schema)** — `prompt` (the question text, required), optional `choices` (a list of `{id, label}` options to pick from), and optional `allow_free_text` (allow a typed answer). These three inputs are what choose the modal shape (see [the scenarios above](#human-in-the-loop-scenarios)).
 4. **What it does when called (`execute`)** — it must:
-   - **send** the question to Jenkins — call the plugin's [`POST` REST API](#rest-api), or use the tiny file-queue bridge shown in `sample_ai/`;
+   - **send** the question to Jenkins — call the plugin's [`POST` REST API](#rest-api), or use a small file-queue bridge;
    - **wait (block)** until a human answers in the modal — this is the important part: the agent should *pause here*, not continue;
    - **return the answer** as a string (the chosen `id`, or the typed text) so the model can act on it.
 
@@ -275,10 +275,10 @@ import os
 from cursor_sdk import Agent, CustomTool, CustomToolContext, LocalAgentOptions
 
 def ask_human(args: dict, ctx: CustomToolContext) -> str:
-    # Hand the question to Jenkins (via the plugin's REST API, or the file-queue
-    # bridge used in sample_ai/) and block until a human answers in the modal.
+    # Hand the question to Jenkins (via the plugin's REST API, or a small
+    # file-queue bridge) and block until a human answers in the modal.
     # Returns the chosen choice id, or the typed free text.
-    return publish_to_jenkins_and_wait(args)      # see sample_ai/scenarios_agent.py
+    return publish_to_jenkins_and_wait(args)      # your impl: POST to the REST API, then wait
 
 tools = {
     "ask_human": CustomTool(
@@ -317,7 +317,7 @@ with Agent.create(
 
 ### One snippet per scenario
 
-Only `choices` and `allow_free_text` change between shapes — the plugin renders the matching modal. Each block is the argument object the model passes to the tool (verbatim from [`scenarios_agent.py`](sample_ai/scenarios_agent.py)):
+Only `choices` and `allow_free_text` change between shapes — the plugin renders the matching modal. Each block is the argument object the model passes to the tool:
 
 ```python
 # 1) Approve / Deny  ── tool: ask_human  →  returns "approve" or "deny"
@@ -551,7 +551,7 @@ mvn -B -ntp clean verify      # runs the full test suite + SpotBugs
 ls target/interactive-input.hpi
 ```
 
-Behind a corporate proxy, configure `~/.m2/settings.xml` and point Maven at `https://repo.jenkins-ci.org/public/` (see [`SESSION_NOTES.md`](SESSION_NOTES.md)).
+Behind a corporate proxy, configure `~/.m2/settings.xml` and point Maven at `https://repo.jenkins-ci.org/public/`.
 
 ---
 
@@ -564,7 +564,6 @@ Behind a corporate proxy, configure `~/.m2/settings.xml` and point Maven at `htt
 | [`docs/BILL_OF_MATERIALS.md`](docs/BILL_OF_MATERIALS.md) | Full dependency + build BOM with versions and licenses. |
 | [`docs/LICENSING.md`](docs/LICENSING.md) | Why MIT, and a primer on OSS license families. |
 | [`docs/SECURITY.md`](docs/SECURITY.md) | Threat model + responsible disclosure. |
-| [`SESSION_NOTES.md`](SESSION_NOTES.md) | Build/verify evidence, versions, live‑test transcript. |
 
 ---
 
