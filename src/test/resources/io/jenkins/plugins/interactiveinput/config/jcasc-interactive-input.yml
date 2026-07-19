@@ -16,4 +16,6 @@ appearance:
     notificationCentre: true
     perProjectCentre: true
     jobPageBox: false
+    userScopedNotifications: true
+    lockToBuildStarter: true
     icon: "hand-left"

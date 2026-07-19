@@ -1,8 +1,11 @@
 package io.jenkins.plugins.interactiveinput.rest;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import hudson.model.Item;
+import io.jenkins.plugins.interactiveinput.config.InteractiveInputAppearanceConfig;
 import io.jenkins.plugins.interactiveinput.config.InteractiveInputGlobalConfig;
 import io.jenkins.plugins.interactiveinput.model.Choice;
 import io.jenkins.plugins.interactiveinput.model.Question;
@@ -129,6 +132,37 @@ class RestApiTest {
     }
 
     @Test
+    void lockToBuildStarterIsEnforcedOverRestAndExposedAsCanAnswer(JenkinsRule j) throws Exception {
+        secure(j);
+        InteractiveInputAppearanceConfig.get().setLockToBuildStarter(true);
+        submit("q1", "builder"); // the build was started by "builder"
+
+        // A non-owner who otherwise holds Item.BUILD can SEE it (lock surfaces readable questions) but
+        // canAnswer is false and the answer POST is refused.
+        WebResponse mallory = get(j.createWebClient().login("mallory"), j, BASE + "questions?job=" + JOB);
+        assertEquals(200, mallory.getStatusCode());
+        JSONObject mBody = json(mallory);
+        assertEquals(1, mBody.getInt("count"), "lock surfaces the question as view-only to non-owners");
+        assertFalse(
+                mBody.getJSONArray("questions").getJSONObject(0).getBoolean("canAnswer"),
+                "a non-owner must not be able to answer while locked");
+        assertEquals(
+                403,
+                postJson(j.createWebClient().login("mallory"), j, BASE + "questions/q1/answer", "{\"choiceId\":\"yes\"}"),
+                "locked answer POST from a non-owner is refused");
+
+        // The owner sees canAnswer=true and can answer.
+        WebResponse owner = get(j.createWebClient().login("builder"), j, BASE + "questions?job=" + JOB);
+        assertTrue(
+                owner.getStatusCode() == 200
+                        && json(owner).getJSONArray("questions").getJSONObject(0).getBoolean("canAnswer"),
+                "the build starter may answer their own build");
+        assertEquals(
+                200,
+                postJson(j.createWebClient().login("builder"), j, BASE + "questions/q1/answer", "{\"choiceId\":\"yes\"}"));
+    }
+
+    @Test
     void answerRequiresBuildPermissionThenResumes(JenkinsRule j) throws Exception {
         secure(j);
         submit("q1");
@@ -151,18 +185,24 @@ class RestApiTest {
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         MockAuthorizationStrategy auth = new MockAuthorizationStrategy();
         // "outsider" has Overall/Read but no Item.READ, to exercise the scoped-endpoint no-leak 404.
-        auth.grant(Jenkins.READ).everywhere().to("reader", "builder", "admin", "outsider");
-        auth.grant(Item.READ).everywhere().to("reader", "builder");
-        auth.grant(Item.BUILD).everywhere().to("builder");
+        // "mallory" is a second builder used to exercise lock-to-build-starter: she holds Item.BUILD but
+        // is not the starter of the seeded build, so the lock (not a missing permission) blocks her.
+        auth.grant(Jenkins.READ).everywhere().to("reader", "builder", "admin", "outsider", "mallory");
+        auth.grant(Item.READ).everywhere().to("reader", "builder", "mallory");
+        auth.grant(Item.BUILD).everywhere().to("builder", "mallory");
         auth.grant(Jenkins.ADMINISTER).everywhere().to("admin");
         j.jenkins.setAuthorizationStrategy(auth);
         j.createFreeStyleProject(JOB);
     }
 
     private static void submit(String id) {
+        submit(id, "tester");
+    }
+
+    private static void submit(String id, String startedBy) {
         QuestionStore.get()
                 .submit(new Question(
-                        id, "Approve?", List.of(new Choice("yes", "Yes")), false, 0L, null, null, JOB, 1, "tester",
+                        id, "Approve?", List.of(new Choice("yes", "Yes")), false, 0L, null, null, JOB, 1, startedBy,
                         System.currentTimeMillis(), false));
     }
 

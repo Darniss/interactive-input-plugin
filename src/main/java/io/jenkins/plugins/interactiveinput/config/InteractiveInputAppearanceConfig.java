@@ -35,6 +35,19 @@ import org.kohsuke.stapler.StaplerRequest2;
  *   <li>{@link #getIcon() icon} — which Ionicon represents interactive input across the bell, badge
  *       and sidebar.</li>
  * </ul>
+ *
+ * <p>Two further switches govern <em>who</em> sees and answers a notification (§user-scoped surfaces):
+ * <ul>
+ *   <li>{@link #isUserScopedNotifications() userScopedNotifications} — off by default (everyone who
+ *       may answer sees a question). When on, the notification surfaces show a question only to the
+ *       user who started the owning build; builds with no human starter (SCM/timer/upstream/system)
+ *       stay visible to everyone since there is no owner to scope to.</li>
+ *   <li>{@link #isLockToBuildStarter() lockToBuildStarter} — off by default. When on, only the build
+ *       starter (or a Jenkins administrator) may <em>answer</em>; everyone else who could see it can
+ *       still read it but the modal controls are locked. Builds with no human starter are not locked
+ *       (otherwise no one could answer them). This is an additional restriction layered on top of the
+ *       existing Job/Build permission and {@code submitterFilter} checks, never a relaxation.</li>
+ * </ul>
  */
 @Extension
 @Symbol("interactiveInputAppearance")
@@ -57,6 +70,8 @@ public class InteractiveInputAppearanceConfig extends GlobalConfiguration {
     private boolean notificationCentre;
     private boolean perProjectCentre = true;
     private boolean jobPageBox = true;
+    private boolean userScopedNotifications;
+    private boolean lockToBuildStarter;
 
     @NonNull
     private String icon = DEFAULT_ICON;
@@ -110,6 +125,26 @@ public class InteractiveInputAppearanceConfig extends GlobalConfiguration {
         save();
     }
 
+    public boolean isUserScopedNotifications() {
+        return userScopedNotifications;
+    }
+
+    @DataBoundSetter
+    public void setUserScopedNotifications(boolean userScopedNotifications) {
+        this.userScopedNotifications = userScopedNotifications;
+        save();
+    }
+
+    public boolean isLockToBuildStarter() {
+        return lockToBuildStarter;
+    }
+
+    @DataBoundSetter
+    public void setLockToBuildStarter(boolean lockToBuildStarter) {
+        this.lockToBuildStarter = lockToBuildStarter;
+        save();
+    }
+
     @NonNull
     public String getIcon() {
         return ICON_CHOICES.contains(icon) ? icon : DEFAULT_ICON;
@@ -158,6 +193,18 @@ public class InteractiveInputAppearanceConfig extends GlobalConfiguration {
         return c == null || c.isJobPageBox();
     }
 
+    /** @return whether notification surfaces are scoped to the build starter. Off by default. */
+    public static boolean userScopedNotificationsEnabled() {
+        InteractiveInputAppearanceConfig c = get();
+        return c != null && c.isUserScopedNotifications();
+    }
+
+    /** @return whether only the build starter (or an admin) may answer. Off by default. */
+    public static boolean lockToBuildStarterEnabled() {
+        InteractiveInputAppearanceConfig c = get();
+        return c != null && c.isLockToBuildStarter();
+    }
+
     /** @return the configured icon's symbol class, or the default's when unconfigured. */
     @NonNull
     public static String iconClassNameOrDefault() {
@@ -186,6 +233,8 @@ public class InteractiveInputAppearanceConfig extends GlobalConfiguration {
         this.notificationCentre = false;
         this.perProjectCentre = false;
         this.jobPageBox = false;
+        this.userScopedNotifications = false;
+        this.lockToBuildStarter = false;
         this.icon = DEFAULT_ICON;
         req.bindJSON(this, json);
         save();

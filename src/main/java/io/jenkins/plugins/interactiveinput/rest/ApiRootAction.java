@@ -87,6 +87,9 @@ public class ApiRootAction implements UnprotectedRootAction {
     static JSONObject questionJson(@NonNull Question q, boolean includeAnswer) {
         JSONObject o = q.toJson(includeAnswer, System.currentTimeMillis());
         o.put("contextHtml", MarkdownRenderer.render(q.getContextMd()));
+        // Whether the current viewer may actually answer (lock-to-build-starter aware). The modal
+        // uses this to lock its controls for a viewer who can see but not answer.
+        o.put("canAnswer", QuestionStore.get().canAnswerEffective(q));
         return o;
     }
 
@@ -200,7 +203,7 @@ public class ApiRootAction implements UnprotectedRootAction {
                     } catch (RuntimeException e) {
                         LOGGER.log(Level.FINE, e, () -> "bridge reconcile failed for " + jobParam);
                     }
-                    list = store.listAnswerableForJob(jobParam);
+                    list = store.listNotificationsForJob(jobParam);
                 }
             } else if (all) {
                 if (!j.hasPermission(Jenkins.ADMINISTER)) {
@@ -208,7 +211,7 @@ public class ApiRootAction implements UnprotectedRootAction {
                 }
                 list = store.listAll();
             } else {
-                list = store.listAnswerable();
+                list = store.listNotifications();
             }
             JSONArray arr = new JSONArray();
             for (Question q : list) {
@@ -262,7 +265,7 @@ public class ApiRootAction implements UnprotectedRootAction {
             if (q == null) {
                 return JsonHttpResponse.error(404, "No such question: " + id);
             }
-            if (!store.canAnswer(q)) {
+            if (!store.canAnswerEffective(q)) {
                 return JsonHttpResponse.error(403, "Job/Build permission (or submitter membership) required");
             }
             if (q.getStatus().isTerminal()) {
@@ -296,7 +299,7 @@ public class ApiRootAction implements UnprotectedRootAction {
             if (q == null) {
                 return JsonHttpResponse.error(404, "No such question: " + id);
             }
-            if (!store.canAbort(q)) {
+            if (!store.canAnswerEffective(q)) {
                 return JsonHttpResponse.error(403, "Job/Build permission (or submitter membership) required");
             }
             if (q.getStatus().isTerminal()) {

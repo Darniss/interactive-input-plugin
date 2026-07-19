@@ -37,6 +37,28 @@
       </f:description>
     </f:entry>
 
+    <f:entry>
+      <f:checkbox field="userScopedNotifications"
+                  title="Show each user only their own build's notifications"/>
+      <f:description>
+        When on, the bell, per-project box, sidebar and build-list badge show a question only to the
+        user who started the owning build. Builds started by SCM, a timer, an upstream job or the
+        system have no human owner, so they stay visible to everyone. Off by default (everyone who may
+        answer sees the question).
+      </f:description>
+    </f:entry>
+
+    <f:entry>
+      <f:checkbox field="lockToBuildStarter"
+                  title="Only the build starter may answer (others can view)"/>
+      <f:description>
+        When on, only the user who started the build (or a Jenkins administrator) can submit an answer;
+        everyone else who can see the question reads it with the controls locked. Builds with no human
+        starter are not locked. This is an extra restriction on top of the usual Job/Build permission
+        and submitter checks — it never grants access. Off by default.
+      </f:description>
+    </f:entry>
+
     <f:entry title="Notification icon" field="icon">
       <f:select/>
     </f:entry>

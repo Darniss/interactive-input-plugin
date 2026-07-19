@@ -1,10 +1,12 @@
 package io.jenkins.plugins.interactiveinput.util;
 
+import edu.umd.cs.findbugs.annotations.CheckForNull;
 import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.model.Cause;
 import hudson.model.Run;
 import hudson.triggers.SCMTrigger;
 import hudson.triggers.TimerTrigger;
+import java.util.Set;
 
 /**
  * Resolves a short, human-readable "who/what started this build" label for a {@link Run}, used to
@@ -18,7 +20,20 @@ public final class CauseResolver {
     /** Returned when a build has no attributable cause. */
     public static final String SYSTEM = "system";
 
+    /** Non-user trigger labels {@link #startedBy} can return instead of a real user id. */
+    private static final Set<String> TRIGGER_LABELS = Set.of(SYSTEM, "scm", "timer", "upstream", "unknown");
+
     private CauseResolver() {}
+
+    /**
+     * @param startedBy a value produced by {@link #startedBy(Run)} (a user id or a trigger label)
+     * @return {@code true} if it denotes a real Jenkins user (i.e. a build a human started), rather
+     *     than a non-interactive trigger label or {@code null}/blank. Used to decide whether a build
+     *     has an "owner" for user-scoped notifications and lock-to-starter.
+     */
+    public static boolean isRealUser(@CheckForNull String startedBy) {
+        return startedBy != null && !startedBy.trim().isEmpty() && !TRIGGER_LABELS.contains(startedBy);
+    }
 
     /**
      * @param run the build to attribute (must not be {@code null})

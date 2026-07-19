@@ -66,10 +66,13 @@ public class InteractiveInputRunAction implements BuildBadgeAction {
         return run.getNumber();
     }
 
-    /** @return {@code true} while this build has a WAITING question (drives the history badge). */
+    /**
+     * @return {@code true} while this build has a WAITING question the current viewer should be
+     *     notified of (drives the history badge, honouring the user-scope and lock switches).
+     */
     public boolean isWaiting() {
         try {
-            return QuestionStore.get().hasWaitingForBuild(getJobFullName(), getBuildNumber());
+            return QuestionStore.get().hasNotificationForBuild(getJobFullName(), getBuildNumber());
         } catch (RuntimeException e) {
             LOGGER.log(Level.FINE, e, () -> "could not compute waiting state for " + run);
             return false;

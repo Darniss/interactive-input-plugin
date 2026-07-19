@@ -49,6 +49,8 @@ class JcascRoundTripTest {
         assertTrue(a.isNotificationCentre(), "notificationCentre enabled in YAML");
         assertTrue(a.isPerProjectCentre());
         assertFalse(a.isJobPageBox(), "jobPageBox disabled in YAML");
+        assertTrue(a.isUserScopedNotifications(), "userScopedNotifications enabled in YAML");
+        assertTrue(a.isLockToBuildStarter(), "lockToBuildStarter enabled in YAML");
         assertEquals("hand-left", a.getIcon());
     }
 

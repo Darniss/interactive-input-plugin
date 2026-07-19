@@ -25,12 +25,32 @@ class InteractiveInputAppearanceConfigTest {
         assertFalse(c.isNotificationCentre(), "global bell is off by default");
         assertTrue(c.isPerProjectCentre(), "per-project centre is on by default");
         assertTrue(c.isJobPageBox(), "job-page box is on by default");
+        assertFalse(c.isUserScopedNotifications(), "user-scoped notifications off by default");
+        assertFalse(c.isLockToBuildStarter(), "lock-to-build-starter off by default");
         assertEquals(InteractiveInputAppearanceConfig.DEFAULT_ICON, c.getIcon());
 
         // Null-safe static helpers agree with the instance.
         assertFalse(InteractiveInputAppearanceConfig.notificationCentreEnabled());
         assertTrue(InteractiveInputAppearanceConfig.perProjectCentreEnabled());
         assertTrue(InteractiveInputAppearanceConfig.jobPageBoxEnabled());
+        assertFalse(InteractiveInputAppearanceConfig.userScopedNotificationsEnabled());
+        assertFalse(InteractiveInputAppearanceConfig.lockToBuildStarterEnabled());
+    }
+
+    @Test
+    void userScopeAndLockPersistThroughSetters(JenkinsRule j) {
+        InteractiveInputAppearanceConfig c = InteractiveInputAppearanceConfig.get();
+        assertNotNull(c);
+
+        c.setUserScopedNotifications(true);
+        c.setLockToBuildStarter(true);
+        assertTrue(InteractiveInputAppearanceConfig.userScopedNotificationsEnabled());
+        assertTrue(InteractiveInputAppearanceConfig.lockToBuildStarterEnabled());
+
+        c.setUserScopedNotifications(false);
+        c.setLockToBuildStarter(false);
+        assertFalse(InteractiveInputAppearanceConfig.userScopedNotificationsEnabled());
+        assertFalse(InteractiveInputAppearanceConfig.lockToBuildStarterEnabled());
     }
 
     @Test

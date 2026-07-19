@@ -60,8 +60,8 @@ public class NotificationBell extends PageDecorator {
             QuestionStore store = QuestionStore.get();
             String jobFullName = getCurrentJobFullName();
             return jobFullName.isEmpty()
-                    ? store.countAnswerable()
-                    : store.countAnswerableForJob(jobFullName);
+                    ? store.countNotifications()
+                    : store.countNotificationsForJob(jobFullName);
         } catch (RuntimeException e) {
             LOGGER.log(Level.FINE, "could not compute initial bell count", e);
             return 0;

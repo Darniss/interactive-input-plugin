@@ -9,10 +9,12 @@ import hudson.model.Item;
 import hudson.model.Job;
 import hudson.model.User;
 import hudson.security.SecurityRealm;
+import io.jenkins.plugins.interactiveinput.config.InteractiveInputAppearanceConfig;
 import io.jenkins.plugins.interactiveinput.model.Answer;
 import io.jenkins.plugins.interactiveinput.model.Choice;
 import io.jenkins.plugins.interactiveinput.model.Question;
 import io.jenkins.plugins.interactiveinput.model.QuestionStatus;
+import io.jenkins.plugins.interactiveinput.util.CauseResolver;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -275,10 +277,6 @@ public class QuestionStore {
         return out;
     }
 
-    public int countAnswerable() {
-        return listAnswerable().size();
-    }
-
     // ---- Per-project (job/build) scoped queries (§per-project notification centre) ----
 
     /** @return WAITING questions for {@code jobFullName} the current user may answer. */
@@ -353,6 +351,88 @@ public class QuestionStore {
         return false;
     }
 
+    // ---- Notification-centre queries (user-scope + lock-to-starter aware) ----
+    // These drive the bell, per-project box, sidebar count and build-list badge. They layer the two
+    // Appearance switches on top of the base permission checks:
+    //   * lock off  -> only questions the user may answer (unchanged behaviour);
+    //   * lock on   -> also readable questions the user may NOT answer (surfaced, then rendered locked);
+    //   * user-scope -> only the current user's own builds (plus ownerless SCM/timer/upstream/system).
+
+    /** @return WAITING questions to surface for the current user across all jobs. */
+    @NonNull
+    public List<Question> listNotifications() {
+        return collectNotifications(null);
+    }
+
+    /** @return WAITING questions to surface for the current user, scoped to one job. */
+    @NonNull
+    public List<Question> listNotificationsForJob(@NonNull String jobFullName) {
+        return collectNotifications(jobFullName);
+    }
+
+    public int countNotifications() {
+        return listNotifications().size();
+    }
+
+    public int countNotificationsForJob(@NonNull String jobFullName) {
+        return listNotificationsForJob(jobFullName).size();
+    }
+
+    /**
+     * @return {@code true} if the build has a WAITING question the current user should be notified of
+     *     (drives the build-history badge, honouring user-scope and lock).
+     */
+    public boolean hasNotificationForBuild(@NonNull String jobFullName, int buildNumber) {
+        boolean userScoped = InteractiveInputAppearanceConfig.userScopedNotificationsEnabled();
+        boolean lock = InteractiveInputAppearanceConfig.lockToBuildStarterEnabled();
+        String uid = currentUserId();
+        for (Question q : questions.values()) {
+            if (q.getStatus() == QuestionStatus.WAITING
+                    && jobFullName.equals(q.getJobFullName())
+                    && q.getBuildNumber() == buildNumber
+                    && isNotification(q, uid, userScoped, lock)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @NonNull
+    private List<Question> collectNotifications(@CheckForNull String jobFullName) {
+        boolean userScoped = InteractiveInputAppearanceConfig.userScopedNotificationsEnabled();
+        boolean lock = InteractiveInputAppearanceConfig.lockToBuildStarterEnabled();
+        String uid = currentUserId();
+        List<Question> out = new ArrayList<>();
+        for (Question q : questions.values()) {
+            if (q.getStatus() != QuestionStatus.WAITING) {
+                continue;
+            }
+            if (jobFullName != null && !jobFullName.equals(q.getJobFullName())) {
+                continue;
+            }
+            if (isNotification(q, uid, userScoped, lock)) {
+                out.add(q);
+            }
+        }
+        return out;
+    }
+
+    private boolean isNotification(@NonNull Question q, @NonNull String uid, boolean userScoped, boolean lock) {
+        if (lock ? !canView(q) : !canAnswer(q)) {
+            return false;
+        }
+        return !userScoped || isOwnedByOrShared(q, uid);
+    }
+
+    /** @return {@code true} if the build has no human starter (shared) or was started by {@code uid}. */
+    private boolean isOwnedByOrShared(@NonNull Question q, @NonNull String uid) {
+        String owner = q.getStartedBy();
+        if (!CauseResolver.isRealUser(owner)) {
+            return true;
+        }
+        return userIdEquals(owner, uid);
+    }
+
     // ----------------------------------------------------------------------------------------
     // Permissions — mirrors pipeline-input-step InputStepExecution#canSettle (verified against 560)
     // ----------------------------------------------------------------------------------------
@@ -374,15 +454,40 @@ public class QuestionStore {
         return isSubmitter(submitter, Jenkins.getAuthentication2());
     }
 
-    /** Abort uses the same permission model as answer (§6.3). */
-    public boolean canAbort(@NonNull Question q) {
-        return canAnswer(q);
+    /**
+     * @return {@code true} if the current authentication may answer <em>after</em> applying the
+     *     lock-to-build-starter switch. This is {@link #canAnswer(Question)} unless the switch is on,
+     *     in which case only the build starter (or a Jenkins administrator) may answer; builds with
+     *     no human starter are never locked. This is the check the REST answer/abort endpoints and
+     *     the modal's {@code canAnswer} flag use — it can only ever restrict, never widen, access.
+     */
+    public boolean canAnswerEffective(@NonNull Question q) {
+        if (!canAnswer(q)) {
+            return false;
+        }
+        if (!InteractiveInputAppearanceConfig.lockToBuildStarterEnabled()) {
+            return true;
+        }
+        Jenkins j = Jenkins.get();
+        if (!j.isUseSecurity() || j.hasPermission(Jenkins.ADMINISTER)) {
+            return true; // admins can always answer (safety valve)
+        }
+        String owner = q.getStartedBy();
+        if (!CauseResolver.isRealUser(owner)) {
+            return true; // no human starter to lock to
+        }
+        return userIdEquals(owner, currentUserId());
     }
 
     /** @return {@code true} if the current authentication can read the source job (Item.READ). */
     public boolean canView(@NonNull Question q) {
         Job<?, ?> job = findJob(q);
         return job != null && job.hasPermission(Item.READ);
+    }
+
+    /** Compare two user ids using the security realm's id strategy (case handling per realm). */
+    private boolean userIdEquals(@NonNull String a, @NonNull String b) {
+        return Jenkins.get().getSecurityRealm().getUserIdStrategy().equals(a, b);
     }
 
     private boolean isSubmitter(@NonNull String submitter, @NonNull Authentication a) {
