@@ -31,7 +31,9 @@ mvn -B -ntp clean verify
 - Per-class: MarkdownRenderer 5, QuestionModel 8, AskInteractiveStep 4, JcascRoundTrip 2,
   QuestionStorePermissions/SLA 5, RestApi 6, InputStepBridge 4, auto-injected harness 5 (1 skipped).
 
-## 3. Live verification on the test Jenkins (`http://135.249.21.72:9090/`)
+## 3. Live verification on the test Jenkins (`http://<test-jenkins>/`)
+
+> Internal host/IP redacted for public publication; the actual address is in the private handoff doc (§5.4).
 
 All authenticated calls used an API token via `curl --noproxy '*'` (server is on the local network).
 Responses summarised; secrets omitted.
@@ -89,7 +91,7 @@ README), V9 ✅ (permission checks unit-tested + admin gating verified live), V1
 ## 7. Corporate proxy note
 
 Behind Nokia's network, `~/.m2/settings.xml` must route through the corporate proxy (host
-`10.158.100.6`/`.7`, port `8080`) with `nonProxyHosts` including the test Jenkins host, and add
+`<corp-proxy-host>`, port `8080`) with `nonProxyHosts` including the test Jenkins host, and add
 `https://repo.jenkins-ci.org/public/` as a repository. The local Maven (`~/.build-tools/`) and
 `env.sh` set `JAVA_HOME`/`M2_HOME` for reproducible builds.
 
