@@ -63,7 +63,7 @@ Both pause a pipeline and wait for a human. Here is what changes:
 | **SLA / auto‑expiry** | ❌ waits forever (unless you code a `timeout{}`) | ✅ per‑step `slaMinutes` + global default |
 | **Surfaces *existing* `input` steps** | n/a | ✅ opt‑in `inputStepBridge` (no pipeline edits) |
 | **Safe Markdown rendering** | n/a | ✅ server‑side escaped (no raw HTML/script) |
-| **JCasC configuration** | partial | ✅ every capability, `unclassified.interactiveInput` |
+| **JCasC configuration** | partial | ✅ every capability across `unclassified.interactiveInput` (functional) + `appearance.interactiveInputAppearance` (surfaces) |
 | Durable across controller restart | ✅ | ✅ (same durable‑step foundation) |
 | Permission model | Item.BUILD / submitter | ✅ **identical** (mirrors `pipeline-input-step`) |
 | Runtime AI dependency | n/a | ❌ none — the API is generic HITL plumbing |
