@@ -523,3 +523,102 @@
   opacity: 0.6;
   cursor: default;
 }
+
+/* ---- "Answer all" affordance (bell dropdown + job box) ---- */
+.ii-answer-all {
+  display: block;
+  width: calc(100% - 20px);
+  margin: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--btn-primary-bg, #4a90d9);
+  border-radius: 6px;
+  background: var(--btn-primary-bg, #4a90d9);
+  color: var(--btn-primary-color, #fff);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+}
+
+.ii-answer-all:hover {
+  filter: brightness(1.05);
+}
+
+.ii-answer-all:focus-visible {
+  outline: 2px solid var(--focus-input-border, #4a90d9);
+  outline-offset: 2px;
+}
+
+/* ---- series pager (numbered slide-through of a series of questions) ---- */
+.ii-series-nav {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--input-border, rgba(128, 128, 128, 0.25));
+  border-radius: 6px;
+  background: var(--panel-header-bg-color, #f0f0f0);
+}
+
+.ii-series-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ii-series-pos {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.ii-series-prev,
+.ii-series-next {
+  padding: 4px 12px;
+}
+
+.ii-series-pips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+/* A numbered pip per question: click to jump. Current is highlighted; answered ones are muted/green. */
+.ii-pip {
+  min-width: 26px;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--input-border, rgba(128, 128, 128, 0.4));
+  border-radius: 13px;
+  background: var(--background, #fff);
+  color: var(--text-color, #2b2b2b);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ii-pip:hover {
+  border-color: var(--accent-color, #4a90d9);
+}
+
+.ii-pip.ii-current {
+  border-color: var(--accent-color, #4a90d9);
+  background: var(--accent-color, #4a90d9);
+  color: #fff;
+}
+
+.ii-pip.ii-done {
+  border-color: var(--success-color, #3a9d5d);
+  color: var(--success-color, #3a9d5d);
+}
+
+.ii-pip.ii-done.ii-current {
+  background: var(--success-color, #3a9d5d);
+  color: #fff;
+}
+
+.ii-pip:focus-visible {
+  outline: 2px solid var(--focus-input-border, #4a90d9);
+  outline-offset: 2px;
+}

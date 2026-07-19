@@ -47,6 +47,22 @@ All notable changes to this project are documented here. The format follows
   `config.jelly` + `Features/config.jelly`), not only via JCasC. `configure()` starts the flags all-off
   before binding (so an unchecked box turns the flag off) and leaves polling / SLA / retention — which
   are not on this form — untouched.
+- **User-scoped notifications & lock** — two more Appearance switches (also as code under
+  `appearance.interactiveInputAppearance`), layered on top of the existing permission checks:
+  - `userScopedNotifications` (default **off**) — when on, every surface (bell, per-project box,
+    build-list badge, sidebar) shows a viewer only the questions for **builds they started**, plus
+    ownerless builds (trigger/SCM/timer-started, which have no human owner). When off, behaviour is
+    unchanged (everyone who can answer sees everything).
+  - `lockToBuildStarter` (default **off**) — when on, non-starters may **see** others' questions but
+    cannot answer them (`Jenkins.ADMINISTER` still overrides). Enforced server-side in the store and
+    REST answer/abort; the REST JSON now carries a per-question `canAnswer` flag and the modal shows a
+    "Locked." note with disabled buttons when it is `false`.
+  - Store surface: `QuestionStore.listNotifications*/countNotifications*/hasNotificationForBuild` and
+    `canAnswerEffective`; ownership resolved via `CauseResolver.isRealUser`.
+- **Multi-question "series" modal** — when two or more questions are waiting for the same scope, the
+  bell dropdown and job-page box offer **"Answer all (N)"**, opening one modal that pages through the
+  questions with a numbered slider (Prev/Next + clickable pips, answered slides marked done). The
+  build-list dot opens the series directly when its build has more than one waiting question.
 
 ### Changed
 - **Build-list badge is now an empty red pulsing dot that opens the answer modal in place.** It no
@@ -66,6 +82,10 @@ All notable changes to this project are documented here. The format follows
 - `bell.js` refactored into a shared client (helpers + modal + answer/preview) reused by the bell and
   the per-project job/audit widgets; the bell clones the operator-chosen icon and scopes its query to
   the current pipeline.
+- **The left-sidebar "Interactive Input (N)" count is now live.** `jobMain.jelly` always renders a
+  hidden `[data-ii-tasklink]` controller (even at zero) that `bell.js` uses to poll the scoped endpoint
+  and re-label the sidebar row — and hide it at zero / re-show it when work arrives — so the number no
+  longer stays stale until a full page reload.
 
 ### Fixed
 - **Stale ("dummy") bridged notifications now clear promptly.** When a native `input` (surfaced by

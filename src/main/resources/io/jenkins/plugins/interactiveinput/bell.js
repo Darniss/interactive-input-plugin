@@ -24,6 +24,7 @@
   var bellMount = document.getElementById("interactive-input-bell");
   var widgetMounts = toArray(document.querySelectorAll("[data-ii-widget]"));
   var auditMounts = toArray(document.querySelectorAll("[data-ii-audit]"));
+  var taskLinkMounts = toArray(document.querySelectorAll("[data-ii-tasklink]"));
   // No early return when there are no mounts: build-history badges ([data-ii-badge]) are injected
   // lazily by the async build-history widget, so they may not exist yet at load. A delegated click
   // handler (wired at the bottom) covers them; the polling mounts are still set up conditionally.
@@ -34,7 +35,7 @@
     var v = node ? node.getAttribute(name) : null;
     return v == null ? dflt : v;
   }
-  var cfgSrc = bellMount || widgetMounts[0] || auditMounts[0];
+  var cfgSrc = bellMount || widgetMounts[0] || auditMounts[0] || taskLinkMounts[0];
   var rootUrl = (attr(cfgSrc, "data-root-url", "") || "").replace(/\/$/, "");
   var apiBase = rootUrl + "/interactive-input/api/v1";
   var richModalDefault = attr(cfgSrc, "data-rich-modal", "true") === "true";
@@ -398,12 +399,27 @@
     var errBox = el("div", { cls: "ii-error", attrs: { role: "alert" } });
     form.appendChild(errBox);
 
+    // Locked (Point 3): when the server reports the viewer may not answer this question (lock-to-
+    // build-starter is on and they are not the owner), they can still read it but the controls are
+    // disabled with an explanation. `canAnswer` is only present when the server computes it, so this
+    // is a no-op for older payloads.
+    var locked = q.canAnswer === false;
+
     var actions = el("div", { cls: "ii-actions" });
     var answerBtn = el("button", { cls: "ii-btn ii-btn-primary", text: "Answer", attrs: { type: "submit" } });
     var denyBtn = el("button", { cls: "ii-btn ii-btn-danger", text: "Deny", attrs: { type: "button" } });
-    var cancelBtn = el("button", { cls: "ii-btn", text: "Cancel", attrs: { type: "button" } });
-    actions.appendChild(answerBtn);
-    actions.appendChild(denyBtn);
+    var cancelBtn = el("button", { cls: "ii-btn", text: locked ? "Close" : "Cancel", attrs: { type: "button" } });
+    if (locked) {
+      var owner = q.startedBy ? " Only " + q.startedBy + " (the build starter) can answer it." : "";
+      errBox.textContent = "Locked." + owner;
+      answerBtn.disabled = true;
+      denyBtn.disabled = true;
+      answerBtn.setAttribute("aria-disabled", "true");
+      denyBtn.setAttribute("aria-disabled", "true");
+    } else {
+      actions.appendChild(answerBtn);
+      actions.appendChild(denyBtn);
+    }
     actions.appendChild(cancelBtn);
     form.appendChild(actions);
     modal.appendChild(form);
@@ -422,7 +438,11 @@
       postJson(apiBase + "/questions/" + encodeURIComponent(q.id) + "/answer", payload)
         .then(function (r) {
           if (r.ok) {
-            closeModal();
+            // In a series the pager keeps the overlay open and moves to the next question; a single
+            // modal closes itself. announceAnswered fires either way so other surfaces refresh.
+            if (!opts.keepOpen) {
+              closeModal();
+            }
             announceAnswered(q);
             onDone();
           } else {
@@ -436,6 +456,9 @@
 
     form.addEventListener("submit", function (e) {
       e.preventDefault();
+      if (locked) {
+        return;
+      }
       var freeText = freeTextArea ? freeTextArea.value.trim() : "";
       if (freeText) {
         submit({ freeText: freeText });
@@ -446,34 +469,172 @@
       }
     });
     denyBtn.addEventListener("click", function () {
+      if (locked) {
+        return;
+      }
       submit({ choiceId: "__deny__" });
     });
     cancelBtn.addEventListener("click", closeModal);
   }
 
+  // Open a fresh overlay hosting `modal`. Wires overlay-click/Escape close and initial focus.
+  function openOverlay(modal) {
+    closeModal();
+    lastFocused = document.activeElement;
+    var overlay = el("div", { cls: "ii-modal-overlay" });
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    activeModal = overlay;
+    overlay.addEventListener("click", function (e) {
+      if (e.target === overlay) closeModal();
+    });
+    document.addEventListener("keydown", modalKeydown, true);
+    focusFirst(modal);
+    return overlay;
+  }
+
+  function focusFirst(modal) {
+    var focusTarget = modal.querySelector("button, [href], input, textarea, select");
+    if (focusTarget) focusTarget.focus();
+  }
+
+  // Swap the modal body inside the current overlay (used by the series pager to move between
+  // questions without tearing down/rebuilding the overlay, so there is no flicker). Falls back to a
+  // fresh overlay when nothing is open yet.
+  function replaceModal(modal) {
+    if (!activeModal) {
+      return openOverlay(modal);
+    }
+    while (activeModal.firstChild) {
+      activeModal.removeChild(activeModal.firstChild);
+    }
+    activeModal.appendChild(modal);
+    focusFirst(modal);
+    return activeModal;
+  }
+
   function showModal(q, opts) {
     opts = opts || {};
     var readOnly = !!opts.readOnly;
-    closeModal();
-    lastFocused = document.activeElement;
-
-    var overlay = el("div", { cls: "ii-modal-overlay" });
     var modal = buildModalShell(q, readOnly);
     if (readOnly) {
       renderAudit(modal, q);
     } else {
       renderForm(modal, q, opts);
     }
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
-    activeModal = overlay;
+    openOverlay(modal);
+  }
 
-    overlay.addEventListener("click", function (e) {
-      if (e.target === overlay) closeModal();
+  // ================================ series pager ================================
+  // A single modal that pages through a *series* of questions with numbered navigation (‹ 2 / 5 ›
+  // plus clickable numbered pips). Answering advances to the next still-waiting question in place;
+  // already-answered ones render read-only so you can review what was chosen. Used by the bell's and
+  // the job box's "Answer all (N)" affordance and by a build with more than one waiting question.
+  function buildSeriesNav(ctx) {
+    var nav = el("div", { cls: "ii-series-nav" });
+    var row = el("div", { cls: "ii-series-row" });
+    var prev = el("button", { cls: "ii-btn ii-series-prev", text: "‹ Prev", attrs: { type: "button" } });
+    var pos = el("span", { cls: "ii-series-pos", text: ctx.index + 1 + " / " + ctx.list.length });
+    var next = el("button", { cls: "ii-btn ii-series-next", text: "Next ›", attrs: { type: "button" } });
+    prev.disabled = ctx.index <= 0;
+    next.disabled = ctx.index >= ctx.list.length - 1;
+    prev.addEventListener("click", function () {
+      ctx.goTo(ctx.index - 1);
     });
-    document.addEventListener("keydown", modalKeydown, true);
-    var focusTarget = modal.querySelector("button, [href], input, textarea, select");
-    if (focusTarget) focusTarget.focus();
+    next.addEventListener("click", function () {
+      ctx.goTo(ctx.index + 1);
+    });
+    row.appendChild(prev);
+    row.appendChild(pos);
+    row.appendChild(next);
+    nav.appendChild(row);
+
+    var pips = el("div", { cls: "ii-series-pips" });
+    ctx.list.forEach(function (q, i) {
+      var cls = "ii-pip";
+      if (i === ctx.index) cls += " ii-current";
+      if (ctx.answered[q.id]) cls += " ii-done";
+      var pip = el("button", {
+        cls: cls,
+        text: String(i + 1),
+        attrs: { type: "button", "aria-label": "Go to question " + (i + 1) }
+      });
+      pip.addEventListener("click", function () {
+        ctx.goTo(i);
+      });
+      pips.appendChild(pip);
+    });
+    nav.appendChild(pips);
+    return nav;
+  }
+
+  function openSeries(questions, opts) {
+    opts = opts || {};
+    var list = (questions || []).filter(function (q) {
+      return !q.status || q.status === "WAITING";
+    });
+    if (list.length <= 1) {
+      if (list.length === 1) {
+        openQuestion(list[0], opts);
+      }
+      return;
+    }
+    var answered = {};
+    var ctx = { list: list, index: 0, answered: answered };
+
+    function render(q) {
+      var isDone = !!answered[q.id] || (q.status && q.status !== "WAITING");
+      var modal = buildModalShell(q, isDone);
+      modal.appendChild(buildSeriesNav(ctx));
+      if (isDone) {
+        renderAudit(modal, q);
+      } else {
+        renderForm(modal, q, {
+          keepOpen: true,
+          richModal: opts.richModal,
+          onDone: function () {
+            answered[q.id] = true;
+            ctx.next();
+          }
+        });
+      }
+      replaceModal(modal);
+    }
+
+    function load(q) {
+      fetchJson(apiBase + "/questions/" + encodeURIComponent(q.id))
+        .then(function (r) {
+          render(r.ok ? r.body : q);
+        })
+        .catch(function () {
+          render(q);
+        });
+    }
+
+    ctx.goTo = function (i) {
+      if (i < 0 || i >= list.length) return;
+      ctx.index = i;
+      load(list[i]);
+    };
+    ctx.next = function () {
+      for (var i = ctx.index + 1; i < list.length; i++) {
+        if (!answered[list[i].id]) {
+          ctx.goTo(i);
+          return;
+        }
+      }
+      for (var j = 0; j < list.length; j++) {
+        if (!answered[list[j].id]) {
+          ctx.goTo(j);
+          return;
+        }
+      }
+      // Nothing left waiting — close and let the surface refresh.
+      closeModal();
+      if (opts.onDone) opts.onDone();
+    };
+
+    ctx.goTo(0);
   }
 
   // ----- shared visibility-aware polling loop -----
@@ -593,6 +754,19 @@
         dropdown.appendChild(el("div", { cls: "ii-empty", text: "Nothing waiting for you right now." }));
         return;
       }
+      // With more than one waiting, offer a single "Answer all" pager that slides through them.
+      if (questionsCache.length >= 2) {
+        var all = el("button", {
+          cls: "ii-answer-all",
+          text: "Answer all (" + questionsCache.length + ")",
+          attrs: { type: "button" }
+        });
+        all.addEventListener("click", function () {
+          toggleDropdown(false);
+          openSeries(questionsCache, { richModal: richModal, onDone: refresh });
+        });
+        dropdown.appendChild(all);
+      }
       var list = el("ul", { cls: "ii-list", attrs: { role: "none" } });
       questionsCache.slice(0, 10).forEach(function (q) {
         var item = el("li", { attrs: { role: "none" } });
@@ -639,7 +813,7 @@
   }
 
   // ================================ per-project widgets ================================
-  function mountListWidget(mount, url, rowFactory, emptyText) {
+  function mountListWidget(mount, url, rowFactory, emptyText, seriesOpts) {
     var listWrap = el("div", { cls: "ii-widget" });
     mount.appendChild(listWrap);
 
@@ -648,6 +822,18 @@
       if (!questions.length) {
         listWrap.appendChild(el("div", { cls: "ii-empty", text: emptyText }));
         return;
+      }
+      // When answering is possible (job box) and more than one is waiting, offer the series pager.
+      if (seriesOpts && questions.length >= 2) {
+        var all = el("button", {
+          cls: "ii-answer-all",
+          text: "Answer all (" + questions.length + ")",
+          attrs: { type: "button" }
+        });
+        all.addEventListener("click", function () {
+          openSeries(questions, { richModal: seriesOpts.richModal, onDone: refresh });
+        });
+        listWrap.appendChild(all);
       }
       var ul = el("ul", { cls: "ii-list" });
       questions.forEach(function (q) {
@@ -689,7 +875,8 @@
           openQuestion(q, { richModal: richModal, onDone: refresh });
         });
       },
-      "All caught up — nothing waiting."
+      "All caught up — nothing waiting.",
+      { richModal: richModal }
     );
   }
 
@@ -708,6 +895,113 @@
       },
       "No interactive-input records for this build (they may have been compacted — see the build console)."
     );
+  }
+
+  // ============================ live sidebar task-link count ============================
+  // Keeps the left-sidebar "Interactive Input (N)" link's number live (Point 2). Core renders that
+  // link server-side once per page load, so without this the count only refreshes on reload. The
+  // always-present [data-ii-tasklink] controller (jobMain.jelly) polls the scoped count and updates
+  // the link text, hides the row at zero, and best-effort reveals it when a question first appears.
+  function mountTaskLink(mount) {
+    var job = attr(mount, "data-job", "");
+    if (!job) {
+      return;
+    }
+    var jobUrl = rootUrl + "/job/" + job.split("/").join("/job/") + "/";
+    var expectedHref = jobUrl + "interactive-input/";
+    var url = apiBase + "/questions?job=" + encodeURIComponent(job);
+
+    function findLink() {
+      var anchors = document.querySelectorAll("#tasks a[href], #side-panel a[href], .task a[href]");
+      for (var i = 0; i < anchors.length; i++) {
+        var href = anchors[i].getAttribute("href") || "";
+        // Match the job's own interactive-input link, not a build's (…/<n>/interactive-input/).
+        if (href === expectedHref || href.replace(/^https?:\/\/[^/]+/, "") === expectedHref) {
+          return anchors[i];
+        }
+      }
+      return null;
+    }
+
+    function taskRow(link) {
+      return (link.closest && link.closest(".task")) || link.parentNode || link;
+    }
+
+    function setLabel(link, text) {
+      var span = link.querySelector(".task-link-text");
+      if (span) {
+        span.textContent = text;
+        return;
+      }
+      // Fallback: rewrite the last non-empty text node so the icon (if any) is preserved.
+      for (var i = link.childNodes.length - 1; i >= 0; i--) {
+        var node = link.childNodes[i];
+        if (node.nodeType === 3 && node.textContent.trim()) {
+          node.textContent = text;
+          return;
+        }
+      }
+      link.appendChild(document.createTextNode(text));
+    }
+
+    function injectLink(text) {
+      var tasks = document.querySelector("#tasks");
+      if (!tasks) {
+        return null;
+      }
+      var sample = tasks.querySelector(".task");
+      if (!sample) {
+        return null;
+      }
+      var clone = sample.cloneNode(true);
+      clone.setAttribute("data-ii-injected", "true");
+      var a = clone.querySelector("a[href]");
+      if (!a) {
+        return null;
+      }
+      a.setAttribute("href", expectedHref);
+      a.removeAttribute("id");
+      setLabel(a, text);
+      tasks.appendChild(clone);
+      return a;
+    }
+
+    function apply(n) {
+      var text = "Interactive Input" + (n > 0 ? " (" + n + ")" : "");
+      var link = findLink();
+      if (n > 0) {
+        if (!link) {
+          link = injectLink(text);
+          if (!link) {
+            return; // sidebar shape unknown — nothing safe to do; reload will render it server-side
+          }
+        } else {
+          setLabel(link, text);
+        }
+        taskRow(link).style.display = "";
+      } else if (link) {
+        taskRow(link).style.display = "none";
+      }
+    }
+
+    apply(parseInt(attr(mount, "data-initial-count", "0"), 10) || 0);
+
+    function refresh() {
+      return fetchJson(url)
+        .then(function (r) {
+          if (r.ok && r.body && typeof r.body.count === "number") {
+            apply(r.body.count);
+          }
+        })
+        .catch(noop);
+    }
+
+    document.addEventListener("ii:answered", function () {
+      refresh();
+    });
+    refresh().then(function () {
+      scheduleLoop(refresh);
+    });
   }
 
   // ============================ build-history badge (delegated) ============================
@@ -765,12 +1059,15 @@
             removeBadge(badge); // already settled elsewhere — clear the stale dot
             return;
           }
-          openQuestion(waiting[0], {
-            richModal: richModalDefault,
-            onDone: function () {
-              refreshBadge(badge, job, build);
-            }
-          });
+          var onDone = function () {
+            refreshBadge(badge, job, build);
+          };
+          // A build with several waiting questions opens the series pager; a single one opens directly.
+          if (waiting.length > 1) {
+            openSeries(waiting, { richModal: richModalDefault, onDone: onDone });
+          } else {
+            openQuestion(waiting[0], { richModal: richModalDefault, onDone: onDone });
+          }
         })
         .catch(noop);
     });
@@ -802,11 +1099,12 @@
   // ----- bootstrap -----
   // Badge clicks are handled by delegation above and need no mount. The polling surfaces (bell, job
   // widgets, audit widgets) are only set up when their mount is present.
-  if (bellMount || widgetMounts.length || auditMounts.length) {
+  if (bellMount || widgetMounts.length || auditMounts.length || taskLinkMounts.length) {
     ensureCrumb().then(function () {
       if (bellMount) mountBell(bellMount);
       widgetMounts.forEach(mountJobWidget);
       auditMounts.forEach(mountAuditWidget);
+      taskLinkMounts.forEach(mountTaskLink);
     });
   }
 })();
