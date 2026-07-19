@@ -1,0 +1,30 @@
+# --- SECURITY: never commit the handoff requirements doc; it contains lab credentials (§5.4) ---
+INTERACTIVE_INPUT_PLUGIN_REQUIREMENTS.md
+
+# Maven
+target/
+pom.xml.releaseBackup
+release.properties
+.flattened-pom.xml
+dependency-reduced-pom.xml
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.project
+.classpath
+.settings/
+.vscode/
+nb-configuration.xml
+
+# OS / editor cruft
+.DS_Store
+*.swp
+*~
+
+# Local build tooling / secrets (never commit)
+*.hpi.sha256
+work/
+/scratch/

@@ -1,0 +1,126 @@
+package io.jenkins.plugins.interactiveinput.store;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import hudson.model.Item;
+import hudson.model.User;
+import hudson.security.ACL;
+import hudson.security.ACLContext;
+import io.jenkins.plugins.interactiveinput.model.Answer;
+import io.jenkins.plugins.interactiveinput.model.Choice;
+import io.jenkins.plugins.interactiveinput.model.Question;
+import io.jenkins.plugins.interactiveinput.model.QuestionStatus;
+import java.util.List;
+import jenkins.model.Jenkins;
+import org.junit.jupiter.api.Test;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.MockAuthorizationStrategy;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
+
+/**
+ * Permission model (§6.3, §8.3) and SLA/retention (§8.2, §8.3) coverage for {@link QuestionStore}.
+ * The answer/view permission model mirrors the built-in {@code input} step: {@code Item.BUILD} to
+ * answer, {@code Item.READ} to view, and {@code submitterFilter} narrows further.
+ */
+@WithJenkins
+class QuestionStorePermissionsSlaTest {
+
+    private static final String JOB = "secured-job";
+
+    @Test
+    void buildPermissionRequiredToAnswer(JenkinsRule j) throws Exception {
+        secure(j);
+        QuestionStore store = QuestionStore.get();
+        Question q = store.submit(question("q1", null, 0L, System.currentTimeMillis()));
+
+        as("builder", () -> {
+            assertTrue(store.canAnswer(q), "builder has Item.BUILD");
+            assertTrue(store.canView(q), "builder has Item.READ");
+        });
+        as("reader", () -> {
+            assertFalse(store.canAnswer(q), "reader lacks Item.BUILD");
+            assertTrue(store.canView(q), "reader has Item.READ");
+        });
+    }
+
+    @Test
+    void submitterFilterNarrowsAnswerers(JenkinsRule j) throws Exception {
+        secure(j);
+        QuestionStore store = QuestionStore.get();
+        Question q = store.submit(question("q2", "alice", 0L, System.currentTimeMillis()));
+
+        as("alice", () -> assertTrue(store.canAnswer(q), "alice matches the submitter filter"));
+        as("builder", () -> assertFalse(store.canAnswer(q), "builder has Item.BUILD but is not the submitter"));
+    }
+
+    @Test
+    void listAnswerableReflectsCurrentUser(JenkinsRule j) throws Exception {
+        secure(j);
+        QuestionStore store = QuestionStore.get();
+        store.submit(question("q3", null, 0L, System.currentTimeMillis()));
+
+        as("builder", () -> assertEquals(1, store.listAnswerable().size()));
+        as("reader", () -> assertEquals(0, store.listAnswerable().size(), "reader cannot answer, so sees none"));
+    }
+
+    @Test
+    void expireOverdueMarksExpired(JenkinsRule j) throws Exception {
+        secure(j);
+        QuestionStore store = QuestionStore.get();
+        long created = System.currentTimeMillis() - 120_000L;
+        store.submit(question("q4", null, 60_000L, created)); // expired 60s ago
+
+        store.expireOverdue(System.currentTimeMillis());
+
+        assertEquals(QuestionStatus.EXPIRED, store.get("q4").getStatus());
+    }
+
+    @Test
+    void compactRemovesOldTerminalQuestions(JenkinsRule j) throws Exception {
+        secure(j);
+        QuestionStore store = QuestionStore.get();
+        store.submit(question("q5", null, 0L, System.currentTimeMillis()));
+        Answer a = store.answer("q5", "a", null, "builder", QuestionStore.SOURCE_UI);
+
+        long retentionMs = 7L * 24 * 60 * 60 * 1000;
+        // Nothing to compact yet.
+        store.compact(a.getAnsweredTs() + 1000L, retentionMs);
+        assertEquals(QuestionStatus.ANSWERED, store.get("q5").getStatus());
+        // Well past retention -> compacted away.
+        store.compact(a.getAnsweredTs() + retentionMs + 1000L, retentionMs);
+        assertNull(store.get("q5"), "answered question should be compacted after retention");
+    }
+
+    // ---- helpers ----
+
+    private static void secure(JenkinsRule j) throws Exception {
+        j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
+        MockAuthorizationStrategy auth = new MockAuthorizationStrategy();
+        auth.grant(Jenkins.READ).everywhere().toEveryone();
+        auth.grant(Item.READ).everywhere().to("reader", "builder", "alice");
+        auth.grant(Item.BUILD).everywhere().to("builder", "alice");
+        j.jenkins.setAuthorizationStrategy(auth);
+        j.createFreeStyleProject(JOB);
+    }
+
+    private static Question question(String id, String submitterFilter, long slaMs, long createdTs) {
+        return new Question(
+                id, "prompt", List.of(new Choice("a", "A")), false, slaMs, null, submitterFilter, JOB, 1, createdTs,
+                false);
+    }
+
+    @FunctionalInterface
+    private interface Body {
+        void run();
+    }
+
+    private static void as(String userId, Body body) {
+        User u = User.getById(userId, true);
+        try (ACLContext ignored = ACL.as2(u.impersonate2())) {
+            body.run();
+        }
+    }
+}

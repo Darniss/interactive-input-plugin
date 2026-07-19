@@ -1,0 +1,18 @@
+<?jelly escape-by-default='true'?>
+<!--
+  Injected at the end of <body> on every page. Renders the bell mount point (with server-provided
+  configuration as data-* attributes) and loads the vanilla-JS/CSS adjunct that drives polling, the
+  dropdown and the rich modal. Nothing renders unless the bell feature is enabled and the viewer has
+  Overall/Read.
+-->
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler">
+  <j:if test="${it.bellVisible}">
+    <div id="interactive-input-bell"
+         data-root-url="${rootURL}"
+         data-poll-seconds="${it.pollingIntervalSeconds}"
+         data-initial-count="${it.initialCount}"
+         data-rich-modal="${it.richModalEnabled}"
+         style="display:none"/>
+    <st:adjunct includes="io.jenkins.plugins.interactiveinput.bell"/>
+  </j:if>
+</j:jelly>

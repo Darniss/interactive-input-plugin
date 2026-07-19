@@ -1,0 +1,8 @@
+<?jelly escape-by-default='true'?>
+<div>
+  Adds an in-UI notification bell and a rich human-in-the-loop modal for Jenkins pipelines that
+  pause for input. Provides an <code>askInteractive</code> pipeline step, a versioned REST API for
+  external agents, and an opt-in bridge that surfaces existing <code>input</code> steps in the same
+  bell. All capabilities are opt-in via the global configuration (and JCasC). Zero AI dependency at
+  runtime.
+</div>

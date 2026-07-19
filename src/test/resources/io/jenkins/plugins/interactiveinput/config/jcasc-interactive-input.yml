@@ -1,0 +1,14 @@
+unclassified:
+  interactiveInput:
+    features:
+      askInteractiveStep: true
+      navBarBell: true
+      richModal: true
+      restApi: true
+      inputStepBridge: true
+      dashboardTile: false
+    polling:
+      intervalSeconds: 30
+    sla:
+      defaultMinutes: 5
+    retentionDays: 14

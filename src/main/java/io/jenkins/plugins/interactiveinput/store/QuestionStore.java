@@ -1,0 +1,476 @@
+package io.jenkins.plugins.interactiveinput.store;
+
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import edu.umd.cs.findbugs.annotations.NonNull;
+import hudson.Extension;
+import hudson.ExtensionList;
+import hudson.XmlFile;
+import hudson.model.Item;
+import hudson.model.Job;
+import hudson.model.User;
+import hudson.security.SecurityRealm;
+import io.jenkins.plugins.interactiveinput.model.Answer;
+import io.jenkins.plugins.interactiveinput.model.Choice;
+import io.jenkins.plugins.interactiveinput.model.Question;
+import io.jenkins.plugins.interactiveinput.model.QuestionStatus;
+import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import jenkins.model.IdStrategy;
+import jenkins.model.Jenkins;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+
+/**
+ * In-memory registry of human-in-the-loop {@link Question}s with XStream persistence to
+ * {@code $JENKINS_HOME/interactive-input/questions.xml} (§8.1, §8.2).
+ *
+ * <p>The store is the single authority for question lifecycle and permissions. Paused pipeline steps
+ * register a transient {@link Resolution} keyed by question id; when a question reaches a terminal
+ * state (answered, aborted, expired) the store invokes that resolution so the pipeline resumes. The
+ * question metadata survives a Jenkins restart via XStream; the resolution is re-registered when the
+ * step's {@code onResume} runs.
+ *
+ * <p>Concurrency: the questions map is a {@link ConcurrentHashMap}; all transitions on a single
+ * {@link Question} are serialised via {@code synchronized (question)} (§8.9).
+ */
+@Extension
+public class QuestionStore {
+
+    private static final Logger LOGGER = Logger.getLogger(QuestionStore.class.getName());
+
+    /** Source tags for the audit trail (§7.7). */
+    public static final String SOURCE_UI = "UI";
+
+    public static final String SOURCE_REST = "REST";
+    public static final String SOURCE_BRIDGE = "BRIDGE";
+    public static final String SOURCE_SYSTEM = "SYSTEM";
+
+    /** Callback invoked once when a question reaches a terminal state. */
+    @FunctionalInterface
+    public interface Resolution {
+        void onResolved(@NonNull Question question);
+    }
+
+    private final Map<String, Question> questions = new ConcurrentHashMap<>();
+
+    /** Transient (in-memory only) resolvers for currently-attached paused steps. */
+    private final transient Map<String, Resolution> resolvers = new ConcurrentHashMap<>();
+
+    public QuestionStore() {
+        load();
+    }
+
+    @NonNull
+    public static QuestionStore get() {
+        return ExtensionList.lookupSingleton(QuestionStore.class);
+    }
+
+    // ----------------------------------------------------------------------------------------
+    // Lifecycle
+    // ----------------------------------------------------------------------------------------
+
+    /**
+     * Register a new WAITING question and persist it.
+     *
+     * @return the same question for convenience
+     */
+    @NonNull
+    public Question submit(@NonNull Question question) {
+        questions.put(question.getId(), question);
+        save();
+        LOGGER.log(Level.FINE, "submitted question {0} for {1} #{2}", new Object[] {
+            question.getId(), question.getJobFullName(), question.getBuildNumber()
+        });
+        fire(QuestionStatus.WAITING, question);
+        return question;
+    }
+
+    /**
+     * Attach a paused step's resolver. If the question already reached a terminal state (e.g. it was
+     * answered while the step was being resumed after a restart), the resolver is invoked immediately.
+     */
+    public void register(@NonNull String questionId, @NonNull Resolution resolution) {
+        resolvers.put(questionId, resolution);
+        Question q = questions.get(questionId);
+        if (q != null && q.getStatus().isTerminal()) {
+            resolvers.remove(questionId);
+            resolution.onResolved(q);
+        }
+    }
+
+    public void unregister(@NonNull String questionId) {
+        resolvers.remove(questionId);
+    }
+
+    /**
+     * Record a human answer and resume the pipeline. Callers must pre-check permissions (a 403 is the
+     * REST/UI layer's responsibility); this method assumes the caller is authorised.
+     *
+     * @throws IllegalStateException if the question is missing or already settled
+     */
+    @NonNull
+    public Answer answer(
+            @NonNull String questionId,
+            @CheckForNull String choiceId,
+            @CheckForNull String freeText,
+            @NonNull String byUserId,
+            @NonNull String source) {
+        Question q = require(questionId);
+        Answer a;
+        synchronized (q) {
+            if (q.getStatus().isTerminal()) {
+                throw new IllegalStateException("Question " + questionId + " is already " + q.getStatus());
+            }
+            a = new Answer(questionId, choiceId, freeText, byUserId, System.currentTimeMillis());
+            q.markAnswered(a);
+        }
+        save();
+        LOGGER.log(Level.INFO, "question {0} answered by {1} via {2} (choice={3}, freeText={4})",
+                new Object[] {questionId, byUserId, source, choiceId, freeText != null});
+        fire(QuestionStatus.ANSWERED, q);
+        resolve(q);
+        return a;
+    }
+
+    /**
+     * Abort a question (cancel the input). Delivers an abort to the pipeline.
+     *
+     * @throws IllegalStateException if the question is missing or already settled
+     */
+    public void abort(@NonNull String questionId, @NonNull String byUserId, @NonNull String source) {
+        Question q = require(questionId);
+        synchronized (q) {
+            if (q.getStatus().isTerminal()) {
+                throw new IllegalStateException("Question " + questionId + " is already " + q.getStatus());
+            }
+            q.markAborted(new Answer(questionId, null, null, byUserId, System.currentTimeMillis()));
+        }
+        save();
+        LOGGER.log(Level.INFO, "question {0} aborted by {1} via {2}", new Object[] {questionId, byUserId, source});
+        fire(QuestionStatus.ABORTED, q);
+        resolve(q);
+    }
+
+    /**
+     * Transition a WAITING question to ABORTED without invoking its resolver. Used when the framework
+     * stops the step itself (e.g. the build is aborted) and will deliver the cause to the pipeline
+     * directly. No-op if the question is missing or already terminal.
+     */
+    public void abortForShutdown(@NonNull String questionId, @NonNull String byUserId) {
+        Question q = questions.get(questionId);
+        if (q == null) {
+            return;
+        }
+        synchronized (q) {
+            if (q.getStatus().isTerminal()) {
+                return;
+            }
+            q.markAborted(new Answer(questionId, null, null, byUserId, System.currentTimeMillis()));
+        }
+        save();
+        LOGGER.log(Level.FINE, "question {0} aborted (step stopped by framework)", questionId);
+        fire(QuestionStatus.ABORTED, q);
+    }
+
+    /** Expire a single overdue question (used by the SLA ticker). */
+    void expire(@NonNull String questionId) {
+        Question q = questions.get(questionId);
+        if (q == null) {
+            return;
+        }
+        synchronized (q) {
+            if (q.getStatus().isTerminal()) {
+                return;
+            }
+            q.markExpired();
+        }
+        save();
+        LOGGER.log(Level.INFO, "question {0} expired (SLA elapsed)", questionId);
+        fire(QuestionStatus.EXPIRED, q);
+        resolve(q);
+    }
+
+    private void resolve(@NonNull Question q) {
+        Resolution r = resolvers.remove(q.getId());
+        if (r != null) {
+            try {
+                r.onResolved(q);
+            } catch (RuntimeException x) {
+                LOGGER.log(Level.WARNING, "resolver for question " + q.getId() + " threw", x);
+            }
+        }
+    }
+
+    // ----------------------------------------------------------------------------------------
+    // Queries
+    // ----------------------------------------------------------------------------------------
+
+    @CheckForNull
+    public Question get(@NonNull String questionId) {
+        return questions.get(questionId);
+    }
+
+    /**
+     * Remove a question outright (used by the input-step bridge to drop a mirror when the underlying
+     * native input has settled or the bridge has been disabled).
+     */
+    public void remove(@NonNull String questionId) {
+        resolvers.remove(questionId);
+        if (questions.remove(questionId) != null) {
+            save();
+        }
+    }
+
+    @NonNull
+    private Question require(@NonNull String questionId) {
+        Question q = questions.get(questionId);
+        if (q == null) {
+            throw new IllegalStateException("No such question: " + questionId);
+        }
+        return q;
+    }
+
+    /** @return all WAITING questions the current user is allowed to answer (bell + default REST list). */
+    @NonNull
+    public List<Question> listAnswerable() {
+        List<Question> out = new ArrayList<>();
+        for (Question q : questions.values()) {
+            if (q.getStatus() == QuestionStatus.WAITING && canAnswer(q)) {
+                out.add(q);
+            }
+        }
+        return out;
+    }
+
+    /** @return all WAITING questions the current user can at least read (Item.READ on the source job). */
+    @NonNull
+    public List<Question> listReadable() {
+        List<Question> out = new ArrayList<>();
+        for (Question q : questions.values()) {
+            if (q.getStatus() == QuestionStatus.WAITING && canView(q)) {
+                out.add(q);
+            }
+        }
+        return out;
+    }
+
+    /** @return every WAITING question (admin only; callers must enforce {@code Overall/Administer}). */
+    @NonNull
+    public List<Question> listAll() {
+        List<Question> out = new ArrayList<>();
+        for (Question q : questions.values()) {
+            if (q.getStatus() == QuestionStatus.WAITING) {
+                out.add(q);
+            }
+        }
+        return out;
+    }
+
+    public int countAnswerable() {
+        return listAnswerable().size();
+    }
+
+    // ----------------------------------------------------------------------------------------
+    // Permissions — mirrors pipeline-input-step InputStepExecution#canSettle (verified against 560)
+    // ----------------------------------------------------------------------------------------
+
+    /** @return {@code true} if the current authentication may answer the question. */
+    public boolean canAnswer(@NonNull Question q) {
+        Job<?, ?> job = findJob(q);
+        if (job == null) {
+            return false;
+        }
+        String submitter = q.getSubmitterFilter();
+        if (submitter == null || submitter.trim().isEmpty()) {
+            return job.hasPermission(Item.BUILD);
+        }
+        Jenkins j = Jenkins.get();
+        if (!j.isUseSecurity() || j.hasPermission(Jenkins.ADMINISTER)) {
+            return true;
+        }
+        return isSubmitter(submitter, Jenkins.getAuthentication2());
+    }
+
+    /** Abort uses the same permission model as answer (§6.3). */
+    public boolean canAbort(@NonNull Question q) {
+        return canAnswer(q);
+    }
+
+    /** @return {@code true} if the current authentication can read the source job (Item.READ). */
+    public boolean canView(@NonNull Question q) {
+        Job<?, ?> job = findJob(q);
+        return job != null && job.hasPermission(Item.READ);
+    }
+
+    private boolean isSubmitter(@NonNull String submitter, @NonNull Authentication a) {
+        Set<String> submitters = new HashSet<>();
+        Collections.addAll(submitters, submitter.split(","));
+        SecurityRealm realm = Jenkins.get().getSecurityRealm();
+        if (isMemberOf(a.getName(), submitters, realm.getUserIdStrategy())) {
+            return true;
+        }
+        for (GrantedAuthority ga : a.getAuthorities()) {
+            if (isMemberOf(ga.getAuthority(), submitters, realm.getGroupIdStrategy())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isMemberOf(String userId, Set<String> submitters, IdStrategy idStrategy) {
+        for (String submitter : submitters) {
+            if (idStrategy.equals(userId, submitter.trim())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @CheckForNull
+    public Job<?, ?> findJob(@NonNull Question q) {
+        Jenkins j = Jenkins.getInstanceOrNull();
+        if (j == null) {
+            return null;
+        }
+        return j.getItemByFullName(q.getJobFullName(), Job.class);
+    }
+
+    /** @return the user id of the current authentication, or {@code "SYSTEM"} if unauthenticated. */
+    @NonNull
+    public static String currentUserId() {
+        User u = User.current();
+        return u != null ? u.getId() : SOURCE_SYSTEM;
+    }
+
+    // ----------------------------------------------------------------------------------------
+    // SLA + retention (driven by SlaTicker)
+    // ----------------------------------------------------------------------------------------
+
+    /** Expire every overdue WAITING question. Called by the SLA ticker. */
+    public void expireOverdue(long now) {
+        for (Question q : questions.values()) {
+            if (q.getStatus() == QuestionStatus.WAITING && q.isExpired(now)) {
+                expire(q.getId());
+            }
+        }
+    }
+
+    /** Remove terminal questions older than {@code retentionMs}. Called by the SLA ticker. */
+    public void compact(long now, long retentionMs) {
+        if (retentionMs <= 0) {
+            return;
+        }
+        boolean changed = false;
+        for (Question q : new ArrayList<>(questions.values())) {
+            if (q.getStatus().isTerminal()) {
+                Answer settled = q.getAnswer();
+                long settledRef = settled != null ? settled.getAnsweredTs() : q.getCreatedTs();
+                if (now - settledRef > retentionMs) {
+                    questions.remove(q.getId());
+                    resolvers.remove(q.getId());
+                    changed = true;
+                }
+            }
+        }
+        if (changed) {
+            save();
+        }
+    }
+
+    // ----------------------------------------------------------------------------------------
+    // Persistence
+    // ----------------------------------------------------------------------------------------
+
+    @NonNull
+    private XmlFile getConfigFile() {
+        File dir = new File(Jenkins.get().getRootDir(), "interactive-input");
+        return new XmlFile(Jenkins.XSTREAM2, new File(dir, "questions.xml"));
+    }
+
+    private synchronized void save() {
+        if (Jenkins.getInstanceOrNull() == null) {
+            return;
+        }
+        try {
+            XmlFile f = getConfigFile();
+            f.mkdirs();
+            f.write(new ArrayList<>(questions.values()));
+        } catch (IOException e) {
+            LOGGER.log(Level.WARNING, "failed to persist interactive-input questions", e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private synchronized void load() {
+        if (Jenkins.getInstanceOrNull() == null) {
+            return;
+        }
+        XmlFile f = getConfigFile();
+        if (!f.exists()) {
+            return;
+        }
+        try {
+            Object data = f.read();
+            questions.clear();
+            if (data instanceof List) {
+                for (Object o : (List<Object>) data) {
+                    if (o instanceof Question) {
+                        Question q = (Question) o;
+                        questions.put(q.getId(), q);
+                    }
+                }
+            }
+            LOGGER.log(Level.FINE, "loaded {0} interactive-input questions", questions.size());
+        } catch (IOException e) {
+            LOGGER.log(Level.WARNING, "failed to load interactive-input questions", e);
+        }
+    }
+
+    // ----------------------------------------------------------------------------------------
+    // Listener fan-out (audit + extensibility)
+    // ----------------------------------------------------------------------------------------
+
+    private void fire(@NonNull QuestionStatus transition, @NonNull Question q) {
+        for (QuestionStoreListener l : QuestionStoreListener.all()) {
+            try {
+                switch (transition) {
+                    case WAITING:
+                        l.onSubmitted(q);
+                        break;
+                    case ANSWERED:
+                        l.onAnswered(q);
+                        break;
+                    case ABORTED:
+                        l.onAborted(q);
+                        break;
+                    case EXPIRED:
+                        l.onExpired(q);
+                        break;
+                    default:
+                        break;
+                }
+            } catch (RuntimeException x) {
+                LOGGER.log(Level.WARNING, "QuestionStoreListener " + l.getClass().getName() + " threw", x);
+            }
+        }
+    }
+
+    // Visible for tests: build a Choice list without importing model in test packages awkwardly.
+    @NonNull
+    public static Choice choice(@NonNull String id, @NonNull String label, @CheckForNull String why) {
+        Choice c = new Choice(id, label);
+        if (why != null) {
+            c.setWhy(why);
+        }
+        return c;
+    }
+}

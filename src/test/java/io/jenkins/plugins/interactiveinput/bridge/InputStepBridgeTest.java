@@ -1,0 +1,149 @@
+package io.jenkins.plugins.interactiveinput.bridge;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import hudson.model.Result;
+import io.jenkins.plugins.interactiveinput.config.InteractiveInputGlobalConfig;
+import io.jenkins.plugins.interactiveinput.model.Question;
+import io.jenkins.plugins.interactiveinput.store.QuestionStore;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
+import org.jenkinsci.plugins.workflow.job.WorkflowJob;
+import org.jenkinsci.plugins.workflow.job.WorkflowRun;
+import org.jenkinsci.plugins.workflow.support.steps.input.InputAction;
+import org.jenkinsci.plugins.workflow.support.steps.input.InputStepExecution;
+import org.junit.jupiter.api.Test;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
+
+/**
+ * Behavioural tests for the opt-in {@link InputStepBridge}: it must mirror pending native
+ * {@code input} steps into the {@link QuestionStore}, forward our answers to the native step, and
+ * reconcile mirrors when the native input settles elsewhere or the feature is switched off.
+ */
+@WithJenkins
+class InputStepBridgeTest {
+
+    @Test
+    void mirrorsPendingInputAndForwardsApprove(JenkinsRule j) throws Exception {
+        enableBridge(true);
+        WorkflowRun b = startPausedAtInput(j, "approve", "input message: 'Deploy to prod?'\necho 'resumed-ok'");
+
+        InputStepBridge.get().sync();
+
+        QuestionStore store = QuestionStore.get();
+        Question q = onlyBridged(store);
+        assertEquals("Deploy to prod?", q.getPrompt());
+        assertTrue(q.isBridged(), "mirror must be flagged as bridged");
+        assertFalse(q.getChoices().isEmpty(), "a parameterless input must offer a proceed choice");
+        assertEquals(InputStepBridge.PROCEED_CHOICE_ID, q.getChoices().get(0).getId());
+
+        // Answering through our store must forward a proceed to the native step and resume the build.
+        store.answer(q.getId(), InputStepBridge.PROCEED_CHOICE_ID, null, "alice", QuestionStore.SOURCE_UI);
+
+        j.waitForCompletion(b);
+        j.assertBuildStatusSuccess(b);
+        j.assertLogContains("resumed-ok", b);
+    }
+
+    @Test
+    void forwardsDenyAsNativeAbort(JenkinsRule j) throws Exception {
+        enableBridge(true);
+        WorkflowRun b = startPausedAtInput(j, "deny", "input message: 'Proceed?'\necho 'should-not-print'");
+
+        InputStepBridge.get().sync();
+        QuestionStore store = QuestionStore.get();
+        Question q = onlyBridged(store);
+
+        // The modal's "Deny" button submits the sentinel deny choice; the bridge must abort the input.
+        store.answer(
+                q.getId(),
+                io.jenkins.plugins.interactiveinput.model.Answer.DENY_CHOICE_ID,
+                null,
+                "bob",
+                QuestionStore.SOURCE_UI);
+
+        j.waitForCompletion(b);
+        j.assertBuildStatus(Result.ABORTED, b);
+    }
+
+    @Test
+    void nativeAnswerDropsOrphanedMirror(JenkinsRule j) throws Exception {
+        enableBridge(true);
+        WorkflowRun b = startPausedAtInput(j, "native", "input message: 'go?'\necho 'done'");
+
+        InputStepBridge bridge = InputStepBridge.get();
+        bridge.sync();
+        QuestionStore store = QuestionStore.get();
+        Question q = onlyBridged(store);
+
+        // Simulate the operator answering via the built-in input UI (bypassing our store entirely).
+        InputStepExecution ise = b.getAction(InputAction.class).getExecutions().get(0);
+        ise.proceed((Map<String, Object>) null);
+        j.waitForCompletion(b);
+        j.assertBuildStatusSuccess(b);
+
+        // The next reconciliation must drop the now-orphaned mirror.
+        bridge.sync();
+        assertNull(store.get(q.getId()), "mirror should be dropped once the native input has settled");
+    }
+
+    @Test
+    void disablingBridgeDropsMirrorsWithoutTouchingTheBuild(JenkinsRule j) throws Exception {
+        enableBridge(true);
+        WorkflowRun b = startPausedAtInput(j, "disable", "input message: 'hold'\necho 'x'");
+
+        InputStepBridge bridge = InputStepBridge.get();
+        bridge.sync();
+        QuestionStore store = QuestionStore.get();
+        assertNotNull(onlyBridged(store));
+
+        enableBridge(false);
+        bridge.sync();
+        assertTrue(
+                store.listAll().stream().noneMatch(Question::isBridged),
+                "disabling the bridge must drop all mirrors");
+
+        // The underlying native input must be untouched (still pending); clean it up to end the build.
+        InputStepExecution ise = b.getAction(InputAction.class).getExecutions().get(0);
+        assertFalse(ise.isSettled(), "disabling the bridge must not settle the native input");
+        ise.doAbort();
+        j.waitForCompletion(b);
+    }
+
+    // ---- helpers ----
+
+    private static void enableBridge(boolean on) {
+        InteractiveInputGlobalConfig cfg = InteractiveInputGlobalConfig.get();
+        assertNotNull(cfg, "global config must be registered");
+        cfg.getFeatures().setInputStepBridge(on);
+        cfg.save();
+    }
+
+    private static WorkflowRun startPausedAtInput(JenkinsRule j, String name, String script) throws Exception {
+        WorkflowJob p = j.createProject(WorkflowJob.class, name);
+        p.setDefinition(new CpsFlowDefinition(script, true));
+        WorkflowRun b = p.scheduleBuild2(0).waitForStart();
+        for (int i = 0; i < 100; i++) {
+            InputAction ia = b.getAction(InputAction.class);
+            if (ia != null && !ia.getExecutions().isEmpty()) {
+                return b;
+            }
+            Thread.sleep(100L);
+        }
+        throw new AssertionError("build " + b + " never paused at an input step");
+    }
+
+    private static Question onlyBridged(QuestionStore store) {
+        List<Question> bridged =
+                store.listAll().stream().filter(Question::isBridged).collect(Collectors.toList());
+        assertEquals(1, bridged.size(), "expected exactly one bridged mirror, got " + bridged);
+        return bridged.get(0);
+    }
+}
