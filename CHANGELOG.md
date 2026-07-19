@@ -42,8 +42,18 @@ All notable changes to this project are documented here. The format follows
     sidebar, chosen from eight meaning-matched Ionicons (`ionicons-api`).
 - **Attention pulse** — the build-history "awaiting input" badge and the job-page box title blink
   slowly in red (`@keyframes ii-attn-pulse`), with a `prefers-reduced-motion` fallback.
+- **Functional configuration UI** — the feature flags (including the opt-in `inputStepBridge`) are now
+  toggleable under **Manage Jenkins → System → Interactive Input** (`InteractiveInputGlobalConfig`
+  `config.jelly` + `Features/config.jelly`), not only via JCasC. `configure()` starts the flags all-off
+  before binding (so an unchecked box turns the flag off) and leaves polling / SLA / retention — which
+  are not on this form — untouched.
 
 ### Changed
+- **Build-list badge is now an empty red pulsing dot that opens the answer modal in place.** It no
+  longer renders the notification icon and no longer navigates to the per-build audit page; clicking it
+  opens the same modal the header bell uses, on the current page. Handled by `bell.js` via
+  `[data-ii-badge]` event delegation, so it also works for build rows the async build-history widget
+  injects after the script runs; the `href` to the audit page remains a no-JS fallback.
 - **Notification-surface settings moved from `features` to Appearance.** `navBarBell` (now
   `notificationCentre`) and `perProjectCentre` are no longer functional feature flags; they live under
   **Appearance** per Jenkins core guidance to separate look-and-feel from functional config. The
@@ -58,12 +68,22 @@ All notable changes to this project are documented here. The format follows
   the current pipeline.
 
 ### Fixed
-- **Build-history badge now blinks everywhere.** The "awaiting input" badge (`badge.jelly`) pulls in the
-  shared style adjunct itself, so the slow red attention pulse and icon sizing render in the build list
-  even when both the header bell (`notificationCentre`) and the job-page box (`jobPageBox`) are off —
-  previously the badge relied on one of those surfaces to have loaded `bell.css`, so with both off it
-  rendered unstyled and did not pulse. Adjunct includes are idempotent, so no double-load. This applies
-  to every waiting build, including native `input` builds surfaced by `inputStepBridge`.
+- **Stale ("dummy") bridged notifications now clear promptly.** When a native `input` (surfaced by
+  `inputStepBridge`) was answered through the built-in console/stage-view UI, our mirror stayed WAITING
+  — showing a stale entry in the bell and a stale build-list badge — until the next 30s ticker
+  reconciliation, which was the only cleanup path. `GET /questions?job=<name>` now calls a **scoped
+  bridge reconcile** (`InputStepBridge#reconcile(String)`) before listing, so a pipeline's surfaces
+  self-heal within one poll (≤15s) without disturbing other jobs. The 30s ticker still reconciles
+  every job (`sync()` = `reconcile(null)`).
+- **Answers refresh every surface immediately.** Answering in any modal dispatches an `ii:answered`
+  DOM event; the bell, per-project box and build-list badge listen for it and refresh at once instead
+  of waiting for their next poll (the answered build's badge is removed once nothing is left waiting).
+- **Build-history badge blinks everywhere.** The "awaiting input" badge (`badge.jelly`) pulls in the
+  shared style adjunct itself, so the slow red attention pulse renders in the build list even when both
+  the header bell (`notificationCentre`) and the job-page box (`jobPageBox`) are off — previously the
+  badge relied on one of those surfaces to have loaded `bell.css`. Adjunct includes are idempotent, so
+  no double-load. This applies to every waiting build, including native `input` builds surfaced by
+  `inputStepBridge`.
 
 ### Notes / trade-offs
 - The durable audit record is the build console line; the per-build audit *page* is a live view of the
