@@ -1,5 +1,6 @@
 package io.jenkins.plugins.interactiveinput.bridge;
 
+import edu.umd.cs.findbugs.annotations.CheckForNull;
 import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.Extension;
 import hudson.ExtensionList;
@@ -67,13 +68,31 @@ public class InputStepBridge {
     }
 
     /**
-     * Reconcile the store's bridged mirrors with the live set of pending native input steps. Safe to
-     * call on every ticker tick; it is a no-op (beyond dropping stale mirrors) when the feature is off.
+     * Reconcile every job's bridged mirrors with the live set of pending native input steps. Invoked
+     * by the SLA ticker every 30s; equivalent to {@link #reconcile(String) reconcile(null)}. Safe to
+     * call repeatedly; it is a no-op (beyond dropping stale mirrors) when the feature is off.
      */
     public void sync() {
+        reconcile(null);
+    }
+
+    /**
+     * Reconcile bridged mirrors with the live native input state.
+     *
+     * <p>When {@code jobScope} is {@code null} every job is scanned (the ticker path). When it names a
+     * job, only that job is scanned and only that job's bridged mirrors are reconciled — this is the
+     * read path: {@code GET /questions?job=<name>} calls it so a pipeline's surfaces self-heal within
+     * one poll (≤15s) instead of waiting up to 30s for the next ticker tick. That matters when a
+     * native input is answered through the built-in console/stage-view UI: our mirror stays WAITING
+     * until the underlying {@link InputStepExecution} disappears from its {@link InputAction} and we
+     * drop it here.
+     *
+     * @param jobScope full name of the single job to reconcile, or {@code null} for all jobs
+     */
+    public void reconcile(@CheckForNull String jobScope) {
         QuestionStore store = QuestionStore.get();
         if (!InteractiveInputGlobalConfig.featuresOrDefault().isInputStepBridge()) {
-            dropAllBridged(store);
+            dropBridged(store, jobScope);
             return;
         }
         Jenkins j = Jenkins.getInstanceOrNull();
@@ -81,55 +100,72 @@ public class InputStepBridge {
             return;
         }
         Set<String> present = new HashSet<>();
-        for (Job<?, ?> job : j.getAllItems(Job.class)) {
-            int checked = 0;
-            for (Run<?, ?> run : job.getBuilds()) {
-                if (checked++ >= MAX_BUILDS_PER_JOB) {
-                    break;
-                }
-                if (!run.isBuilding()) {
-                    continue;
-                }
-                InputAction ia = run.getAction(InputAction.class);
-                if (ia == null) {
-                    continue;
-                }
-                try {
-                    for (InputStepExecution ise : ia.getExecutions()) {
-                        String qid = bridgeId(run, ise.getId());
-                        present.add(qid);
-                        if (store.get(qid) == null) {
-                            mirror(store, run, ise, qid);
-                        }
-                        // (Re)attach the resolver every tick so answers still forward after a restart
-                        // (the mirror survives via XStream but its resolver is transient). Idempotent.
-                        final String runId = run.getExternalizableId();
-                        final String inputId = ise.getId();
-                        store.register(qid, resolved -> forward(runId, inputId, resolved));
-                    }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return;
-                } catch (Exception e) {
-                    LOGGER.log(Level.FINE, e, () -> "could not read InputAction for " + run);
-                }
+        if (jobScope != null) {
+            Job<?, ?> job = j.getItemByFullName(jobScope, Job.class);
+            if (job != null) {
+                scanJob(store, job, present);
+            }
+        } else {
+            for (Job<?, ?> job : j.getAllItems(Job.class)) {
+                scanJob(store, job, present);
             }
         }
         // Drop mirrors whose native input has settled (e.g. answered via the built-in UI). listAll()
-        // returns a copy of the WAITING questions, so removing from the store here is safe.
+        // returns a copy of the WAITING questions, so removing here is safe. Only in-scope mirrors are
+        // considered, so a scoped reconcile never disturbs other jobs' notifications.
         for (Question q : store.listAll()) {
-            if (q.isBridged() && !present.contains(q.getId())) {
+            if (q.isBridged() && inScope(q, jobScope) && !present.contains(q.getId())) {
                 store.remove(q.getId());
             }
         }
     }
 
-    private void dropAllBridged(@NonNull QuestionStore store) {
+    /** Scan one job's building runs for pending native inputs; mirror new ones and (re)attach resolvers. */
+    private void scanJob(@NonNull QuestionStore store, @NonNull Job<?, ?> job, @NonNull Set<String> present) {
+        int checked = 0;
+        for (Run<?, ?> run : job.getBuilds()) {
+            if (checked++ >= MAX_BUILDS_PER_JOB) {
+                break;
+            }
+            if (!run.isBuilding()) {
+                continue;
+            }
+            InputAction ia = run.getAction(InputAction.class);
+            if (ia == null) {
+                continue;
+            }
+            try {
+                for (InputStepExecution ise : ia.getExecutions()) {
+                    String qid = bridgeId(run, ise.getId());
+                    present.add(qid);
+                    if (store.get(qid) == null) {
+                        mirror(store, run, ise, qid);
+                    }
+                    // (Re)attach the resolver every tick so answers still forward after a restart (the
+                    // mirror survives via XStream but its resolver is transient). Idempotent.
+                    final String runId = run.getExternalizableId();
+                    final String inputId = ise.getId();
+                    store.register(qid, resolved -> forward(runId, inputId, resolved));
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            } catch (Exception e) {
+                LOGGER.log(Level.FINE, e, () -> "could not read InputAction for " + run);
+            }
+        }
+    }
+
+    private void dropBridged(@NonNull QuestionStore store, @CheckForNull String jobScope) {
         for (Question q : store.listAll()) {
-            if (q.isBridged()) {
+            if (q.isBridged() && inScope(q, jobScope)) {
                 store.remove(q.getId());
             }
         }
+    }
+
+    private static boolean inScope(@NonNull Question q, @CheckForNull String jobScope) {
+        return jobScope == null || jobScope.equals(q.getJobFullName());
     }
 
     private void mirror(

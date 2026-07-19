@@ -95,6 +95,34 @@ class InputStepBridgeTest {
     }
 
     @Test
+    void scopedReconcileHealsAnsweredNativeInputForThatJobOnly(JenkinsRule j) throws Exception {
+        enableBridge(true);
+        WorkflowRun a = startPausedAtInput(j, "scoped-a", "input message: 'A?'\necho 'a-done'");
+        WorkflowRun b = startPausedAtInput(j, "scoped-b", "input message: 'B?'\necho 'b-done'");
+
+        InputStepBridge bridge = InputStepBridge.get();
+        bridge.sync();
+        QuestionStore store = QuestionStore.get();
+        Question qa = onlyBridgedFor(store, a.getParent().getFullName());
+        Question qb = onlyBridgedFor(store, b.getParent().getFullName());
+
+        // Operator answers A via the built-in input UI (bypassing our store); A resumes and settles.
+        a.getAction(InputAction.class).getExecutions().get(0).proceed((Map<String, Object>) null);
+        j.waitForCompletion(a);
+        j.assertBuildStatusSuccess(a);
+
+        // The scoped read-path reconcile (as GET /questions?job=A triggers) must drop A's now-orphaned
+        // mirror immediately — without waiting for the 30s ticker and without touching B's mirror.
+        bridge.reconcile(a.getParent().getFullName());
+        assertNull(store.get(qa.getId()), "A's mirror must be dropped by the scoped reconcile");
+        assertNotNull(store.get(qb.getId()), "a reconcile scoped to A must not disturb B's mirror");
+
+        // Clean up B's still-pending native input to end its build.
+        b.getAction(InputAction.class).getExecutions().get(0).doAbort();
+        j.waitForCompletion(b);
+    }
+
+    @Test
     void disablingBridgeDropsMirrorsWithoutTouchingTheBuild(JenkinsRule j) throws Exception {
         enableBridge(true);
         WorkflowRun b = startPausedAtInput(j, "disable", "input message: 'hold'\necho 'x'");
@@ -144,6 +172,15 @@ class InputStepBridgeTest {
         List<Question> bridged =
                 store.listAll().stream().filter(Question::isBridged).collect(Collectors.toList());
         assertEquals(1, bridged.size(), "expected exactly one bridged mirror, got " + bridged);
+        return bridged.get(0);
+    }
+
+    private static Question onlyBridgedFor(QuestionStore store, String jobFullName) {
+        List<Question> bridged = store.listAll().stream()
+                .filter(Question::isBridged)
+                .filter(q -> jobFullName.equals(q.getJobFullName()))
+                .collect(Collectors.toList());
+        assertEquals(1, bridged.size(), "expected exactly one bridged mirror for " + jobFullName + ", got " + bridged);
         return bridged.get(0);
     }
 }

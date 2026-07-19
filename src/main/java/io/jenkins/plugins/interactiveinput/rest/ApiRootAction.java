@@ -6,6 +6,7 @@ import hudson.Extension;
 import hudson.model.Item;
 import hudson.model.Job;
 import hudson.model.UnprotectedRootAction;
+import io.jenkins.plugins.interactiveinput.bridge.InputStepBridge;
 import io.jenkins.plugins.interactiveinput.config.InteractiveInputGlobalConfig;
 import io.jenkins.plugins.interactiveinput.model.Choice;
 import io.jenkins.plugins.interactiveinput.model.Question;
@@ -15,6 +16,8 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.util.List;
 import java.util.Locale;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import java.util.stream.Collectors;
 import jenkins.model.Jenkins;
 import jenkins.security.stapler.StaplerAccessibleType;
@@ -46,6 +49,8 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
 public class ApiRootAction implements UnprotectedRootAction {
 
     public static final String URL_NAME = "interactive-input";
+
+    private static final Logger LOGGER = Logger.getLogger(ApiRootAction.class.getName());
 
     @Override
     @CheckForNull
@@ -186,6 +191,15 @@ public class ApiRootAction implements UnprotectedRootAction {
                     list = store.listForBuild(jobParam, buildNumber);
                     includeAnswer = true; // audit view: show what was chosen
                 } else {
+                    // Self-heal bridged mirrors for this pipeline so answers made through the native
+                    // input UI (or a mirror just answered here) drop out within one poll instead of
+                    // waiting for the 30s ticker. reconcile() is a cheap near-no-op when the bridge is
+                    // off, and must never break the list response.
+                    try {
+                        InputStepBridge.get().reconcile(jobParam);
+                    } catch (RuntimeException e) {
+                        LOGGER.log(Level.FINE, e, () -> "bridge reconcile failed for " + jobParam);
+                    }
                     list = store.listAnswerableForJob(jobParam);
                 }
             } else if (all) {
