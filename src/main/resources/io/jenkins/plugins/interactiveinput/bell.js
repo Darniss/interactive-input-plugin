@@ -24,9 +24,9 @@
   var bellMount = document.getElementById("interactive-input-bell");
   var widgetMounts = toArray(document.querySelectorAll("[data-ii-widget]"));
   var auditMounts = toArray(document.querySelectorAll("[data-ii-audit]"));
-  if (!bellMount && !widgetMounts.length && !auditMounts.length) {
-    return;
-  }
+  // No early return when there are no mounts: build-history badges ([data-ii-badge]) are injected
+  // lazily by the async build-history widget, so they may not exist yet at load. A delegated click
+  // handler (wired at the bottom) covers them; the polling mounts are still set up conditionally.
   window.__interactiveInputLoaded = true;
 
   // ----- shared config (all mounts share the same Jenkins origin) -----
@@ -39,6 +39,19 @@
   var apiBase = rootUrl + "/interactive-input/api/v1";
   var richModalDefault = attr(cfgSrc, "data-rich-modal", "true") === "true";
   var pollSeconds = Math.max(5, parseInt(attr(cfgSrc, "data-poll-seconds", "15"), 10) || 15);
+
+  // When the only surface on the page is a build-history badge (no mount to read config from), adopt
+  // the origin from the clicked badge's data-root-url so API calls resolve under any context path.
+  function adoptRootUrl(node) {
+    if (cfgSrc) {
+      return;
+    }
+    var ru = node && node.getAttribute ? node.getAttribute("data-root-url") : null;
+    if (ru != null) {
+      rootUrl = ru.replace(/\/$/, "");
+      apiBase = rootUrl + "/interactive-input/api/v1";
+    }
+  }
 
   var crumb = null; // {field, value}
 
@@ -58,6 +71,18 @@
   }
 
   function noop() {}
+
+  // Let every surface on the page (bell, per-project widgets, build-list badges) update immediately
+  // when a question is answered from any modal here, instead of waiting for the next poll.
+  function announceAnswered(q) {
+    try {
+      document.dispatchEvent(
+        new CustomEvent("ii:answered", { detail: { id: q.id, job: q.jobFullName, build: q.buildNumber } })
+      );
+    } catch (e) {
+      /* CustomEvent unsupported: surfaces still refresh on their next poll. */
+    }
+  }
 
   function fetchJson(url, options) {
     options = options || {};
@@ -83,6 +108,17 @@
       .catch(function () {
         /* CSRF protection may be disabled; proceed without a crumb. */
       });
+  }
+
+  // Load the crumb at most once, on demand — so a badge-only page (no eager mount bootstrap) still
+  // has a crumb before it POSTs an answer.
+  var crumbAttempted = false;
+  function ensureCrumb() {
+    if (crumbAttempted) {
+      return Promise.resolve();
+    }
+    crumbAttempted = true;
+    return loadCrumb();
   }
 
   function postJson(url, payload) {
@@ -387,6 +423,7 @@
         .then(function (r) {
           if (r.ok) {
             closeModal();
+            announceAnswered(q);
             onDone();
           } else {
             fail((r.body && r.body.message) || "Failed (HTTP " + r.status + ")");
@@ -592,6 +629,9 @@
         toggleDropdown(false);
       }
     });
+    document.addEventListener("ii:answered", function () {
+      refresh();
+    });
 
     refresh().then(function () {
       scheduleLoop(refresh);
@@ -627,6 +667,10 @@
         })
         .catch(noop);
     }
+
+    document.addEventListener("ii:answered", function () {
+      refresh();
+    });
 
     refresh().then(function () {
       scheduleLoop(refresh);
@@ -666,10 +710,103 @@
     );
   }
 
-  // ----- bootstrap -----
-  loadCrumb().then(function () {
-    if (bellMount) mountBell(bellMount);
-    widgetMounts.forEach(mountJobWidget);
-    auditMounts.forEach(mountAuditWidget);
+  // ============================ build-history badge (delegated) ============================
+  // The empty red dot in the build list. Clicking it opens the answer modal in place (like the bell),
+  // rather than navigating to the audit page. Delegation is used so it also works for build rows the
+  // async build-history widget injects after this script runs.
+  function closestBadge(node) {
+    while (node && node.nodeType === 1) {
+      if (node.hasAttribute && node.hasAttribute("data-ii-badge")) {
+        return node;
+      }
+      node = node.parentNode;
+    }
+    return null;
+  }
+
+  function removeBadge(badge) {
+    if (badge && badge.parentNode) {
+      badge.parentNode.removeChild(badge);
+    }
+  }
+
+  function buildQuestionsUrl(job, build) {
+    return apiBase + "/questions?job=" + encodeURIComponent(job) + "&build=" + encodeURIComponent(build);
+  }
+
+  function waitingFrom(body) {
+    var qs = body && Array.isArray(body.questions) ? body.questions : [];
+    return qs.filter(function (q) {
+      return q.status === "WAITING";
+    });
+  }
+
+  // Re-check a build and drop its badge once nothing is left WAITING (handles builds with more than
+  // one pending question — the dot stays until the last one is answered).
+  function refreshBadge(badge, job, build) {
+    fetchJson(buildQuestionsUrl(job, build))
+      .then(function (r) {
+        if (r.ok && !waitingFrom(r.body).length) {
+          removeBadge(badge);
+        }
+      })
+      .catch(noop);
+  }
+
+  function openBadge(badge) {
+    adoptRootUrl(badge);
+    var job = badge.getAttribute("data-job") || "";
+    var build = badge.getAttribute("data-build") || "";
+    ensureCrumb().then(function () {
+      fetchJson(buildQuestionsUrl(job, build))
+        .then(function (r) {
+          var waiting = r.ok ? waitingFrom(r.body) : [];
+          if (!waiting.length) {
+            removeBadge(badge); // already settled elsewhere — clear the stale dot
+            return;
+          }
+          openQuestion(waiting[0], {
+            richModal: richModalDefault,
+            onDone: function () {
+              refreshBadge(badge, job, build);
+            }
+          });
+        })
+        .catch(noop);
+    });
+  }
+
+  document.addEventListener("click", function (e) {
+    var badge = closestBadge(e.target);
+    if (!badge) {
+      return;
+    }
+    e.preventDefault();
+    openBadge(badge);
   });
+
+  // A question answered from any other surface on the page (bell / job box) should also clear the
+  // matching build's badge.
+  document.addEventListener("ii:answered", function (e) {
+    var d = e && e.detail;
+    toArray(document.querySelectorAll("[data-ii-badge]")).forEach(function (badge) {
+      var job = badge.getAttribute("data-job");
+      var build = badge.getAttribute("data-build");
+      if (d && d.job && d.build != null && (job !== d.job || build !== String(d.build))) {
+        return; // unrelated build — leave it alone
+      }
+      refreshBadge(badge, job, build);
+    });
+  });
+
+  // ----- bootstrap -----
+  // Badge clicks are handled by delegation above and need no mount. The polling surfaces (bell, job
+  // widgets, audit widgets) are only set up when their mount is present.
+  if (bellMount || widgetMounts.length || auditMounts.length) {
+    ensureCrumb().then(function () {
+      if (bellMount) mountBell(bellMount);
+      widgetMounts.forEach(mountJobWidget);
+      auditMounts.forEach(mountAuditWidget);
+    });
+  }
 })();

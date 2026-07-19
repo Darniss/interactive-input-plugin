@@ -197,17 +197,28 @@
   border-bottom: 1px solid var(--input-border, rgba(128, 128, 128, 0.15));
 }
 
-/* "awaiting input" build-history badge */
+/*
+ * "awaiting input" build-history badge — a small empty red dot (no icon) shown next to a build that
+ * is waiting for an answer. Clicking it opens the answer modal in place (see bell.js). It pulses
+ * slowly (ii-attn-pulse below) to catch the eye.
+ */
 .ii-badge {
-  display: inline-flex;
-  align-items: center;
-  color: var(--error-color, #d54c53);
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin: 0 4px;
+  border-radius: 50%;
+  background: var(--error-color, #d54c53);
   vertical-align: middle;
+  cursor: pointer;
+  flex: 0 0 auto; /* keep the dot round inside flex build rows */
+  text-decoration: none;
 }
 
-.ii-badge svg {
-  width: 16px;
-  height: 16px;
+.ii-badge:hover,
+.ii-badge:focus-visible {
+  outline: 2px solid var(--error-color, #d54c53);
+  outline-offset: 2px;
 }
 
 /*
