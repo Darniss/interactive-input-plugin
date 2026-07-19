@@ -146,16 +146,8 @@
     </dependency>
   </dependencies>
 
-  <repositories>
-    <repository>
-      <id>repo.jenkins-ci.org</id>
-      <url>https://repo.jenkins-ci.org/public/</url>
-    </repository>
-  </repositories>
-  <pluginRepositories>
-    <pluginRepository>
-      <id>repo.jenkins-ci.org</id>
-      <url>https://repo.jenkins-ci.org/public/</url>
-    </pluginRepository>
-  </pluginRepositories>
+  <!-- repositories / pluginRepositories are intentionally NOT declared here:
+       the org.jenkins-ci.plugins:plugin parent POM already provides
+       https://repo.jenkins-ci.org/public/ for both. Re-declaring them is
+       redundant and is flagged by the Jenkins Hosting checker (MavenVerifier). -->
 </project>

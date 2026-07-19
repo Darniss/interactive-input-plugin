@@ -50,9 +50,11 @@ Responses summarised; secrets omitted.
 | 8 | **XSS check** via `POST /preview` | `<script>alert(1)</script>` → `&lt;script&gt;…` (escaped, inert) |
 | 9 | `?all=true` without admin / with admin | admin-gated as designed |
 | 10 | **`inputStepBridge`** (`ii-bridge-livetest`) | Native `input` mirrored as `bridged:true`; answered mirror via REST → native step **proceeded** (`Approved by darnr`) → build **SUCCESS** |
+| 11 | **Sample project `hitl-input-test` (V5)** — regression with plugin active | Build **#13 SUCCESS** (~10 min). Cursor-SDK agent asked 2 questions via native parameterized `input`; both **surfaced in the bell as `bridged:true` with a deep link** (parameterized → read-only, by design). Answered Q1 (`staging`) via the execution API and Q2 (`yes`) via native HTTP `POST …/input/<id>/proceed` → **HTTP 200**. Agent logged `[hitl_agent] status=finished`; `deploy_config.txt` written (`environment=staging`, `feature_x=yes`). After both inputs settled the bridge **auto-dropped the mirrors** (`/questions?all=true` → `count:0`, `/health` → `pending:0`). |
 
 **Acceptance checklist (§9.3 / delegator V-table) status:** V1 ✅, V2 ✅, V3 ✅, V4 ✅ (via Script
-Console, D2), V6 ✅ (bell + assets), V7 ✅ (modal assets + all modal-backing REST endpoints verified
+Console, D2), **V5 ✅ (sample `hitl-input-test` build #13 → SUCCESS with plugin active; see row 11)**,
+V6 ✅ (bell + assets), V7 ✅ (modal assets + all modal-backing REST endpoints verified
 live; full visual click-through needs an interactive browser session), V8 ✅ (curl examples in
 README), V9 ✅ (permission checks unit-tested + admin gating verified live), V11 ✅, V12 ✅.
 
