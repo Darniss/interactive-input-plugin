@@ -25,7 +25,10 @@ import jenkins.model.TransientActionFactory;
  *       which iterate {@code allActions} and include each action's {@code jobMain.jelly}). It
  *       self-hides when nothing is pending.</li>
  *   <li>{@code index.jelly} — the action's own page (reached via the left-sidebar link that appears
- *       only when there are pending questions, driven by {@link #getIconFileName()}).</li>
+ *       only when there are pending questions, driven by {@link #getIconFileName()}). While showing,
+ *       its "{@code (N)}" count is kept live client-side by the always-present {@code data-ii-tasklink}
+ *       controller in {@code jobMain.jelly} (see {@code bell.js}), so it no longer goes stale until a
+ *       page reload.</li>
  * </ul>
  *
  * <p>Both surfaces mount the shared JS widget, which polls the scoped REST endpoint
@@ -70,10 +73,10 @@ public class InteractiveInputJobAction implements Action {
         return job.getFullName();
     }
 
-    /** @return WAITING questions for this job the current viewer may answer (0 on any store error). */
+    /** @return WAITING questions this job should surface to the current viewer (0 on any store error). */
     public int getPendingCount() {
         try {
-            return QuestionStore.get().countAnswerableForJob(job.getFullName());
+            return QuestionStore.get().countNotificationsForJob(job.getFullName());
         } catch (RuntimeException e) {
             LOGGER.log(Level.FINE, e, () -> "could not count pending questions for " + job.getFullName());
             return 0;
@@ -89,9 +92,12 @@ public class InteractiveInputJobAction implements Action {
     }
 
     /**
-     * @return the sidebar icon path, or {@code null} to hide the link. The link (and the inline box)
-     *     appear only when the feature is on and this job has pending questions, so the entry acts as
-     *     a per-project notification indicator rather than permanent clutter.
+     * @return the sidebar icon path, or {@code null} to hide the link. The link appears only when the
+     *     feature is on and this job has pending questions (so it stays a per-project indicator, not
+     *     permanent clutter on every job). While it is showing, the always-present
+     *     {@code data-ii-tasklink} controller (see {@code jobMain.jelly} / {@code bell.js}) keeps its
+     *     "{@code (N)}" count live and hides the row when the count reaches zero, so the number no
+     *     longer goes stale until a full page reload.
      */
     @Override
     @CheckForNull

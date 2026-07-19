@@ -1,12 +1,26 @@
 <?jelly escape-by-default='true'?>
 <!--
   Inline box on the job/pipeline page (rendered by {WorkflowJob,AbstractProject}/main.jelly, which
-  iterate allActions and include each action's jobMain.jelly). Shows only when this job has pending
-  questions AND the operator has left the box enabled (Appearance -> Interactive Input). The title
-  and icon pulse slowly (red) to draw the eye; the shared JS widget polls the scoped REST endpoint
-  and opens the shared modal.
+  iterate allActions and include each action's jobMain.jelly).
+
+  Two pieces render here whenever the per-project centre is on (i.e. whenever this action exists):
+    1. An always-present, invisible [data-ii-tasklink] controller + the shared adjunct. bell.js uses
+       it to keep the left-sidebar "Interactive Input (N)" link's count LIVE (updating the number and
+       hiding the row at zero) instead of the number going stale until a page reload.
+    2. The large inline box — shown only when this job has pending questions AND the operator left the
+       box enabled (Appearance -> Interactive Input). Its title/icon pulse slowly (red) to draw the eye.
+  Both mount the shared JS widget, which polls the scoped REST endpoint and opens the shared modal.
 -->
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout">
+  <st:adjunct includes="io.jenkins.plugins.interactiveinput.bell"/>
+  <span class="ii-tasklink-controller"
+        style="display:none"
+        data-ii-tasklink="job"
+        data-root-url="${rootURL}"
+        data-job="${it.jobFullName}"
+        data-poll-seconds="${it.pollingIntervalSeconds}"
+        data-initial-count="${it.pendingCount}"/>
+
   <j:if test="${it.pendingCount > 0 and it.jobPageBoxEnabled}">
     <div class="ii-jobbox">
       <div class="ii-jobbox-title ii-attn">
@@ -22,6 +36,5 @@
            data-rich-modal="${it.richModalEnabled}"
            data-initial-count="${it.pendingCount}"/>
     </div>
-    <st:adjunct includes="io.jenkins.plugins.interactiveinput.bell"/>
   </j:if>
 </j:jelly>
