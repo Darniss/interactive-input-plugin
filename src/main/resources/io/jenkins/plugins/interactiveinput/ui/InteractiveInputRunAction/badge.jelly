@@ -1,0 +1,19 @@
+<?jelly escape-by-default='true'?>
+<!--
+  Rendered by the build-history widget for each BuildBadgeAction on a run. Shows a small "awaiting
+  input" marker (the configured icon, pulsing slowly in red via .ii-badge; links to the per-build
+  audit page) only while the build is waiting for an answer.
+
+  The badge pulls in the shared adjunct itself so the .ii-badge styling (size + slow red blink) applies
+  wherever the build-history list is shown — including when the header bell and the job-page box are
+  both off (they are the other places that load this adjunct). Adjunct includes are idempotent, so this
+  never double-loads, and bell.js no-ops on a page that has only a badge (no mount points).
+-->
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout">
+  <j:if test="${it.waiting}">
+    <st:adjunct includes="io.jenkins.plugins.interactiveinput.bell"/>
+    <a href="${rootURL}/${it.run.url}interactive-input/" class="ii-badge" title="Awaiting interactive input">
+      <l:icon src="${it.iconClassName}"/>
+    </a>
+  </j:if>
+</j:jelly>

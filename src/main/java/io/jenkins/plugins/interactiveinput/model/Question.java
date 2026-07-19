@@ -47,6 +47,10 @@ public class Question implements Serializable {
 
     private final int buildNumber;
 
+    /** Jenkins user id (or trigger label) that started the owning build; {@code null} for legacy data. */
+    @CheckForNull
+    private final String startedBy;
+
     private final long createdTs;
 
     /** {@code true} when this question mirrors a built-in {@code input} step (bridge). */
@@ -72,6 +76,7 @@ public class Question implements Serializable {
             @CheckForNull String submitterFilter,
             @NonNull String jobFullName,
             int buildNumber,
+            @CheckForNull String startedBy,
             long createdTs,
             boolean bridged) {
         this.id = id;
@@ -83,6 +88,7 @@ public class Question implements Serializable {
         this.submitterFilter = submitterFilter;
         this.jobFullName = jobFullName;
         this.buildNumber = buildNumber;
+        this.startedBy = startedBy;
         this.createdTs = createdTs;
         this.bridged = bridged;
         this.status = QuestionStatus.WAITING;
@@ -130,6 +136,12 @@ public class Question implements Serializable {
 
     public int getBuildNumber() {
         return buildNumber;
+    }
+
+    /** @return the user id (or trigger label) that started the build, or {@code null} for legacy data. */
+    @CheckForNull
+    public String getStartedBy() {
+        return startedBy;
     }
 
     public long getCreatedTs() {
@@ -226,6 +238,7 @@ public class Question implements Serializable {
         o.put("contextMd", contextMd);
         o.put("jobFullName", jobFullName);
         o.put("buildNumber", buildNumber);
+        o.put("startedBy", startedBy == null ? "" : startedBy);
         o.put("createdTs", createdTs);
         o.put("status", status.name());
         o.put("slaMs", slaMs);

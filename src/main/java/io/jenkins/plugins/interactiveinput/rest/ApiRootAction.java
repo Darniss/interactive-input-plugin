@@ -3,6 +3,8 @@ package io.jenkins.plugins.interactiveinput.rest;
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.Extension;
+import hudson.model.Item;
+import hudson.model.Job;
 import hudson.model.UnprotectedRootAction;
 import io.jenkins.plugins.interactiveinput.config.InteractiveInputGlobalConfig;
 import io.jenkins.plugins.interactiveinput.model.Choice;
@@ -141,7 +143,19 @@ public class ApiRootAction implements UnprotectedRootAction {
     // ==========================================================================================
     public static class Questions {
 
-        /** GET /questions — list WAITING questions visible to the caller. */
+        /**
+         * GET /questions — list WAITING questions visible to the caller.
+         *
+         * <p>Scoping:
+         * <ul>
+         *   <li>{@code ?job=<fullName>} — questions for one job the caller may answer (per-project
+         *       notification centre). Requires {@code Item.READ} on that job; 404 otherwise (no leak).</li>
+         *   <li>{@code ?job=<fullName>&build=<n>} — every readable question (any status, with answers)
+         *       for one build (per-build audit view).</li>
+         *   <li>{@code ?all=true} — every WAITING question (requires {@code Overall/Administer}).</li>
+         *   <li>default — every WAITING question the caller may answer, across all jobs.</li>
+         * </ul>
+         */
         public HttpResponse doIndex(StaplerRequest2 req) {
             HttpResponse disabled = apiDisabledOrNull();
             if (disabled != null) {
@@ -152,9 +166,29 @@ public class ApiRootAction implements UnprotectedRootAction {
                 return JsonHttpResponse.error(403, "Overall/Read required");
             }
             QuestionStore store = QuestionStore.get();
+            String jobParam = req.getParameter("job");
             boolean all = "true".equalsIgnoreCase(req.getParameter("all"));
             List<Question> list;
-            if (all) {
+            boolean includeAnswer = false;
+            if (jobParam != null && !jobParam.isEmpty()) {
+                Job<?, ?> job = j.getItemByFullName(jobParam, Job.class);
+                if (job == null || !job.hasPermission(Item.READ)) {
+                    return JsonHttpResponse.error(404, "No such job: " + jobParam);
+                }
+                String buildParam = req.getParameter("build");
+                if (buildParam != null && !buildParam.isEmpty()) {
+                    int buildNumber;
+                    try {
+                        buildNumber = Integer.parseInt(buildParam.trim());
+                    } catch (NumberFormatException e) {
+                        return JsonHttpResponse.error(400, "build must be an integer");
+                    }
+                    list = store.listForBuild(jobParam, buildNumber);
+                    includeAnswer = true; // audit view: show what was chosen
+                } else {
+                    list = store.listAnswerableForJob(jobParam);
+                }
+            } else if (all) {
                 if (!j.hasPermission(Jenkins.ADMINISTER)) {
                     return JsonHttpResponse.error(403, "Overall/Administer required for ?all=true");
                 }
@@ -164,7 +198,7 @@ public class ApiRootAction implements UnprotectedRootAction {
             }
             JSONArray arr = new JSONArray();
             for (Question q : list) {
-                arr.add(questionJson(q, false));
+                arr.add(questionJson(q, includeAnswer));
             }
             JSONObject o = new JSONObject();
             o.put("count", arr.size());

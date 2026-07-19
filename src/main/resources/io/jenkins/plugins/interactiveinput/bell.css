@@ -1,17 +1,36 @@
 /*
- * Interactive Input bell + modal styles.
+ * Interactive Input bell + modal + per-project widget styles.
  * Theme-aware via Jenkins CSS custom properties (with safe fallbacks) so light and dark themes both
  * work; contrast and focus states target WCAG 2.1 AA.
  *
- * v0.1 renders the bell as a fixed control near the top-right; tighter integration into the header
- * DOM is a v0.2 refinement (see SESSION_NOTES).
+ * The global bell is anchored inline into the header controls when possible (so it no longer overlaps
+ * the settings gear); if no header container is found it falls back to a floating control pinned to
+ * the bottom-right, well clear of the header icons.
  */
 
 .ii-bell-container {
-  position: fixed;
-  top: 10px;
-  right: 76px;
+  position: relative;
   z-index: 1000;
+}
+
+/* Preferred: inline among the header's top-right controls. */
+.ii-bell-container.ii-bell-inline {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 4px;
+}
+
+/* Fallback: floating control pinned bottom-right, clear of the header settings gear. */
+.ii-bell-container.ii-bell-fixed {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+}
+
+/* When floating bottom-right, the dropdown opens upward. */
+.ii-bell-fixed .ii-dropdown {
+  top: auto;
+  bottom: 46px;
 }
 
 .ii-bell-btn {
@@ -28,6 +47,11 @@
   color: var(--text-color, #2b2b2b);
   cursor: pointer;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.ii-bell-btn svg {
+  width: 20px;
+  height: 20px;
 }
 
 .ii-bell-btn:hover {
@@ -125,6 +149,164 @@
 .ii-item-sla {
   font-size: 11px;
   color: var(--error-color, #d54c53);
+}
+
+.ii-item-by {
+  font-size: 11px;
+  color: var(--text-color-secondary, #6a6a6a);
+}
+
+.ii-item-outcome {
+  font-size: 12px;
+  color: var(--text-color-secondary, #6a6a6a);
+}
+
+/* ---- per-project surfaces (job box, job/audit widgets) ---- */
+.ii-jobbox {
+  margin: 0 0 1em;
+  border: 1px solid var(--input-border, rgba(128, 128, 128, 0.3));
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.ii-jobbox-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  font-weight: 700;
+  border-bottom: 1px solid var(--input-border, rgba(128, 128, 128, 0.2));
+  background: var(--panel-header-bg-color, #f0f0f0);
+}
+
+.ii-jobbox-title svg {
+  width: 18px;
+  height: 18px;
+}
+
+.ii-page-sub {
+  color: var(--text-color-secondary, #6a6a6a);
+  margin: 0 0 1em;
+}
+
+.ii-widget .ii-list {
+  border: 0;
+}
+
+.ii-widget .ii-item {
+  border-bottom: 1px solid var(--input-border, rgba(128, 128, 128, 0.15));
+}
+
+/* "awaiting input" build-history badge */
+.ii-badge {
+  display: inline-flex;
+  align-items: center;
+  color: var(--error-color, #d54c53);
+  vertical-align: middle;
+}
+
+.ii-badge svg {
+  width: 16px;
+  height: 16px;
+}
+
+/*
+ * Slow "attention" pulse for the build-list badge and the job-page box title, so a waiting question
+ * catches the eye (in red). Deliberately gentle (opacity 1 -> ~0.4 over 1.7s). Motion is disabled for
+ * users who prefer reduced motion (WCAG 2.3.3 / vestibular safety).
+ */
+@keyframes ii-attn-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.ii-badge,
+.ii-jobbox-title.ii-attn {
+  animation: ii-attn-pulse 1.7s ease-in-out infinite;
+}
+
+.ii-jobbox-title.ii-attn {
+  color: var(--error-color, #d54c53);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ii-badge,
+  .ii-jobbox-title.ii-attn {
+    animation: none;
+  }
+}
+
+/* status pills (audit view) */
+.ii-pill {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #fff;
+  background: var(--text-color-secondary, #6a6a6a);
+}
+
+.ii-pill-waiting {
+  background: var(--accent-color, #4a90d9);
+}
+
+.ii-pill-answered {
+  background: var(--success-color, #3a9d5d);
+}
+
+.ii-pill-aborted,
+.ii-pill-expired {
+  background: var(--error-color, #d54c53);
+}
+
+.ii-sub-by {
+  color: var(--text-color-secondary, #6a6a6a);
+}
+
+/* audit modal: static choices + outcome */
+.ii-audit-choices {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+}
+
+.ii-audit-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  border: 1px solid var(--input-border, rgba(128, 128, 128, 0.25));
+  border-radius: 6px;
+}
+
+.ii-audit-choice.ii-chosen {
+  border-color: var(--success-color, #3a9d5d);
+  background: var(--panel-header-bg-color, #eef7f0);
+}
+
+.ii-audit-outcome {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--panel-header-bg-color, #f0f0f0);
+}
+
+.ii-audit-outcome-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-color-secondary, #6a6a6a);
+  margin-bottom: 4px;
 }
 
 /* ---- modal ---- */

@@ -10,6 +10,7 @@ import io.jenkins.plugins.interactiveinput.model.Answer;
 import io.jenkins.plugins.interactiveinput.model.Choice;
 import io.jenkins.plugins.interactiveinput.model.Question;
 import io.jenkins.plugins.interactiveinput.store.QuestionStore;
+import io.jenkins.plugins.interactiveinput.util.CauseResolver;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -154,6 +155,7 @@ public class InputStepBridge {
                 input.getSubmitter(),
                 run.getParent().getFullName(),
                 run.getNumber(),
+                CauseResolver.startedBy(run),
                 System.currentTimeMillis(),
                 true);
         store.submit(q);

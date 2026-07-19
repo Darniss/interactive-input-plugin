@@ -279,6 +279,80 @@ public class QuestionStore {
         return listAnswerable().size();
     }
 
+    // ---- Per-project (job/build) scoped queries (§per-project notification centre) ----
+
+    /** @return WAITING questions for {@code jobFullName} the current user may answer. */
+    @NonNull
+    public List<Question> listAnswerableForJob(@NonNull String jobFullName) {
+        List<Question> out = new ArrayList<>();
+        for (Question q : questions.values()) {
+            if (q.getStatus() == QuestionStatus.WAITING && jobFullName.equals(q.getJobFullName()) && canAnswer(q)) {
+                out.add(q);
+            }
+        }
+        return out;
+    }
+
+    /** @return WAITING questions for {@code jobFullName} the current user can at least read. */
+    @NonNull
+    public List<Question> listReadableForJob(@NonNull String jobFullName) {
+        List<Question> out = new ArrayList<>();
+        for (Question q : questions.values()) {
+            if (q.getStatus() == QuestionStatus.WAITING && jobFullName.equals(q.getJobFullName()) && canView(q)) {
+                out.add(q);
+            }
+        }
+        return out;
+    }
+
+    /** @return the number of WAITING questions for {@code jobFullName} the current user may answer. */
+    public int countAnswerableForJob(@NonNull String jobFullName) {
+        return listAnswerableForJob(jobFullName).size();
+    }
+
+    /**
+     * @return every question (any status) recorded for a specific build that the current user can
+     *     read. Used by the per-build audit view; includes settled questions until compaction.
+     */
+    @NonNull
+    public List<Question> listForBuild(@NonNull String jobFullName, int buildNumber) {
+        List<Question> out = new ArrayList<>();
+        for (Question q : questions.values()) {
+            if (jobFullName.equals(q.getJobFullName()) && q.getBuildNumber() == buildNumber && canView(q)) {
+                out.add(q);
+            }
+        }
+        return out;
+    }
+
+    /** @return {@code true} if {@code jobFullName} #{@code buildNumber} has any WAITING question. */
+    public boolean hasWaitingForBuild(@NonNull String jobFullName, int buildNumber) {
+        for (Question q : questions.values()) {
+            if (q.getStatus() == QuestionStatus.WAITING
+                    && jobFullName.equals(q.getJobFullName())
+                    && q.getBuildNumber() == buildNumber) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Existence probe (no permission filter) used by the run-action factory to decide whether to
+     * attach the per-build surfaces. Anyone reaching a build page already holds {@code Item.READ}, so
+     * this leaks nothing beyond what the audit view (which is permission-checked) would show.
+     *
+     * @return {@code true} if any question (any status) is recorded for this build.
+     */
+    public boolean hasAnyForBuild(@NonNull String jobFullName, int buildNumber) {
+        for (Question q : questions.values()) {
+            if (jobFullName.equals(q.getJobFullName()) && q.getBuildNumber() == buildNumber) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // ----------------------------------------------------------------------------------------
     // Permissions — mirrors pipeline-input-step InputStepExecution#canSettle (verified against 560)
     // ----------------------------------------------------------------------------------------

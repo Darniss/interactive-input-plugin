@@ -1,18 +1,23 @@
 <?jelly escape-by-default='true'?>
 <!--
   Injected at the end of <body> on every page. Renders the bell mount point (with server-provided
-  configuration as data-* attributes) and loads the vanilla-JS/CSS adjunct that drives polling, the
-  dropdown and the rich modal. Nothing renders unless the bell feature is enabled and the viewer has
-  Overall/Read.
+  configuration as data-* attributes, plus the chosen icon as a hidden <l:icon> template the client
+  clones into the bell button) and loads the vanilla-JS/CSS adjunct that drives polling, the dropdown
+  and the rich modal. Nothing renders unless the bell feature is enabled and the viewer has
+  Overall/Read. data-job carries the current pipeline (empty on the dashboard) so the client scopes
+  the list: all answerable questions on the dashboard, only this pipeline's inside a job/build.
 -->
-<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler">
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout">
   <j:if test="${it.bellVisible}">
     <div id="interactive-input-bell"
          data-root-url="${rootURL}"
+         data-job="${it.currentJobFullName}"
          data-poll-seconds="${it.pollingIntervalSeconds}"
          data-initial-count="${it.initialCount}"
          data-rich-modal="${it.richModalEnabled}"
-         style="display:none"/>
+         style="display:none">
+      <span class="ii-icon-template" style="display:none"><l:icon src="${it.iconClassName}"/></span>
+    </div>
     <st:adjunct includes="io.jenkins.plugins.interactiveinput.bell"/>
   </j:if>
 </j:jelly>

@@ -7,16 +7,18 @@ import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.DataBoundSetter;
 
 /**
- * Per-capability feature flags (§6.4). Every capability is opt-in-able so an operator can enable or
- * disable individual surfaces via the UI or JCasC without uninstalling the plugin.
+ * Per-capability <em>functional</em> feature flags (§6.4), shown under <em>Manage Jenkins →
+ * System</em>. Every capability is opt-in-able so an operator can enable or disable it via the UI or
+ * JCasC without uninstalling the plugin.
  *
- * <p>Defaults match the shipped JCasC example: the step, bell, modal and REST API are on; the
- * input-step bridge and dashboard tile are off.
+ * <p>Defaults: the step, modal and REST API are on; the input-step bridge and dashboard tile are
+ * off. Notification-surface visibility (global bell, per-project centre, job-page box, icon) lives
+ * separately in {@link InteractiveInputAppearanceConfig} under <em>Manage Jenkins → Appearance</em>,
+ * per Jenkins core guidance to keep look-and-feel settings out of functional configuration.
  */
 public class Features extends AbstractDescribableImpl<Features> {
 
     private boolean askInteractiveStep = true;
-    private boolean navBarBell = true;
     private boolean richModal = true;
     private boolean restApi = true;
     private boolean inputStepBridge = false;
@@ -34,15 +36,6 @@ public class Features extends AbstractDescribableImpl<Features> {
     @DataBoundSetter
     public void setAskInteractiveStep(boolean askInteractiveStep) {
         this.askInteractiveStep = askInteractiveStep;
-    }
-
-    public boolean isNavBarBell() {
-        return navBarBell;
-    }
-
-    @DataBoundSetter
-    public void setNavBarBell(boolean navBarBell) {
-        this.navBarBell = navBarBell;
     }
 
     public boolean isRichModal() {

@@ -1,0 +1,27 @@
+<?jelly escape-by-default='true'?>
+<!--
+  Inline box on the job/pipeline page (rendered by {WorkflowJob,AbstractProject}/main.jelly, which
+  iterate allActions and include each action's jobMain.jelly). Shows only when this job has pending
+  questions AND the operator has left the box enabled (Appearance -> Interactive Input). The title
+  and icon pulse slowly (red) to draw the eye; the shared JS widget polls the scoped REST endpoint
+  and opens the shared modal.
+-->
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout">
+  <j:if test="${it.pendingCount > 0 and it.jobPageBoxEnabled}">
+    <div class="ii-jobbox">
+      <div class="ii-jobbox-title ii-attn">
+        <l:icon src="${it.iconClassName}" class="ii-attn-icon"/>
+        <span>Interactive Input</span>
+      </div>
+      <div class="interactive-input-widget"
+           data-ii-widget="job"
+           data-root-url="${rootURL}"
+           data-job="${it.jobFullName}"
+           data-scope="job"
+           data-poll-seconds="${it.pollingIntervalSeconds}"
+           data-rich-modal="${it.richModalEnabled}"
+           data-initial-count="${it.pendingCount}"/>
+    </div>
+    <st:adjunct includes="io.jenkins.plugins.interactiveinput.bell"/>
+  </j:if>
+</j:jelly>
