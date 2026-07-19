@@ -1,5 +1,8 @@
 # --- SECURITY: never commit the handoff requirements doc; it contains lab credentials (§5.4) ---
 INTERACTIVE_INPUT_PLUGIN_REQUIREMENTS.md
+HOSTING.md
+SESSION_NOTES.md
+sample_ai/
 
 # Maven
 target/
