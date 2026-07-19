@@ -1,0 +1,13 @@
+<?jelly escape-by-default='true'?>
+<!--
+  Functional configuration, rendered under Manage Jenkins -> System -> "Interactive Input". Exposes
+  the per-capability feature flags (including the input-step bridge) so operators can toggle them in
+  the UI instead of only via JCasC. Bell polling interval, default SLA and retention stay
+  JCasC/Script-Console configurable and are intentionally not on this form; configure() preserves
+  their current values. Notification look-and-feel is configured under Manage Jenkins -> Appearance.
+-->
+<j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form">
+  <f:section title="Interactive Input">
+    <f:property field="features"/>
+  </f:section>
+</j:jelly>

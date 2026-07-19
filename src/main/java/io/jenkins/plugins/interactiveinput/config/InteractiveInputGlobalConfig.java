@@ -90,14 +90,25 @@ public class InteractiveInputGlobalConfig extends GlobalConfiguration {
 
     @Override
     public boolean configure(StaplerRequest2 req, JSONObject json) throws FormException {
-        // Re-bind from scratch so unchecked boxes reset to false.
-        this.features = new Features();
-        this.polling = new Polling();
-        this.sla = new Sla();
-        this.retentionDays = DEFAULT_RETENTION_DAYS;
+        // Feature flags are booleans and Stapler omits unchecked checkboxes, so start them all-off and
+        // let the submitted form re-enable the checked ones (config.jelly renders every flag). Polling,
+        // SLA and retention are not on this form (JCasC / Script Console only), so leave their current
+        // values untouched rather than resetting them to defaults on every System save.
+        this.features = allFeaturesOff();
         req.bindJSON(this, json);
         save();
         return true;
+    }
+
+    @NonNull
+    private static Features allFeaturesOff() {
+        Features f = new Features();
+        f.setAskInteractiveStep(false);
+        f.setRichModal(false);
+        f.setRestApi(false);
+        f.setInputStepBridge(false);
+        f.setDashboardTile(false);
+        return f;
     }
 
     // ---- Null-safe convenience accessors used across the plugin ----
