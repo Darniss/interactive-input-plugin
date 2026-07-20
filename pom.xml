@@ -158,8 +158,21 @@
     </dependency>
   </dependencies>
 
-  <!-- repositories / pluginRepositories are intentionally NOT declared here:
-       the org.jenkins-ci.plugins:plugin parent POM already provides
-       https://repo.jenkins-ci.org/public/ for both. Re-declaring them is
-       redundant and is flagged by the Jenkins Hosting checker (MavenVerifier). -->
+  <!-- The org.jenkins-ci.plugins:plugin parent POM is hosted at repo.jenkins-ci.org, NOT
+       Maven Central, so these must be declared here to bootstrap resolution of the parent
+       POM (and Maven plugins) on a clean CI with no custom settings.xml — e.g. the CodeQL
+       autobuild in the Jenkins Security Scan. This matches the standard Jenkins plugin
+       archetype; a repo the parent "provides" cannot be used to download the parent itself. -->
+  <repositories>
+    <repository>
+      <id>repo.jenkins-ci.org</id>
+      <url>https://repo.jenkins-ci.org/public/</url>
+    </repository>
+  </repositories>
+  <pluginRepositories>
+    <pluginRepository>
+      <id>repo.jenkins-ci.org</id>
+      <url>https://repo.jenkins-ci.org/public/</url>
+    </pluginRepository>
+  </pluginRepositories>
 </project>
