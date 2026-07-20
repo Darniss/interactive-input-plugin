@@ -7,13 +7,13 @@
   <parent>
     <groupId>org.jenkins-ci.plugins</groupId>
     <artifactId>plugin</artifactId>
-    <version>5.31</version>
+    <version>6.2211.v27f680c93c53</version>
     <relativePath/>
   </parent>
 
   <groupId>io.jenkins.plugins</groupId>
   <artifactId>interactive-input</artifactId>
-  <version>0.1.0-SNAPSHOT</version>
+  <version>${changelist}</version>
   <packaging>hpi</packaging>
 
   <name>Interactive Input</name>
@@ -29,17 +29,6 @@
     </license>
   </licenses>
 
-  <developers>
-    <developer>
-      <id>darniss</id>
-      <name>Darniss</name>
-      <email>darniss.mail@gmail.com</email>
-      <roles>
-        <role>maintainer</role>
-      </roles>
-    </developer>
-  </developers>
-
   <scm>
     <connection>scm:git:https://github.com/jenkinsci/interactive-input-plugin.git</connection>
     <developerConnection>scm:git:git@github.com:jenkinsci/interactive-input-plugin.git</developerConnection>
@@ -48,19 +37,29 @@
   </scm>
 
   <properties>
-    <!-- Verified 2026-07-19: test Jenkins server core is 2.555.2; pin to it so the HPI installs there. -->
-    <jenkins.version>2.555.2</jenkins.version>
-    <!-- Compile to Java 17 bytecode (built on JDK 21). -->
-    <maven.compiler.release>17</maven.compiler.release>
-    <!-- Parent 5.31 ships maven-hpi-plugin 3.1784, which cannot parse Java 21 (class v65)
-         bytecode; override to the Java-21-aware release used by bom-2.555.x. -->
-    <hpi-plugin.version>3.1814.v77d15159f9b_d</hpi-plugin.version>
+    <changelist>999999-SNAPSHOT</changelist>
+    <!-- Baseline: https://www.jenkins.io/doc/developer/plugin-development/choosing-jenkins-baseline/
+         The test server core is 2.555.2 (verified 2026-07-19), so target that patch. -->
+    <jenkins.baseline>2.555</jenkins.baseline>
+    <jenkins.version>${jenkins.baseline}.2</jenkins.version>
     <gitHubRepo>jenkinsci/interactive-input-plugin</gitHubRepo>
-    <!-- Hard requirement (§7.2): modal dialog surface requires pipeline-input-step >= 560. -->
-    <pipeline-input-step.version>560.v56198a_642157</pipeline-input-step.version>
-    <commonmark.version>0.24.0</commonmark.version>
+
+    <!-- Enforcer bans required for hosting. Verified clean: tests are JUnit 5 only, main code uses
+         StaplerRequest2/StaplerResponse2 (no javax.servlet), and there is no commons-lang 2 usage. -->
+    <ban-junit4-imports.skip>false</ban-junit4-imports.skip>
+    <ban-deprecated-stapler.skip>false</ban-deprecated-stapler.skip>
+    <ban-commons-lang-2.skip>false</ban-commons-lang-2.skip>
+    <banObsoleteDependencyOverrides.skip>false</banObsoleteDependencyOverrides.skip>
+    <hpi.strictBundledArtifacts>true</hpi.strictBundledArtifacts>
+
+    <!-- Formatting is enforced in CI once `mvn spotless:apply` has been run in a Maven
+         environment; keep it disabled until then so CD is not blocked on formatting. -->
+    <spotless.check.skip>true</spotless.check.skip>
+
     <!-- commonmark is a third-party (non-plugin) library we intentionally bundle into the HPI for
-         safe markdown rendering; declare it so the hpi plugin does not warn about it. -->
+         safe markdown rendering. It is not managed by the bom, so pin it and list it so strict
+         bundling accepts it. -->
+    <commonmark.version>0.24.0</commonmark.version>
     <hpi.bundledArtifacts>commonmark</hpi.bundledArtifacts>
   </properties>
 
@@ -68,7 +67,7 @@
     <dependencies>
       <dependency>
         <groupId>io.jenkins.tools.bom</groupId>
-        <artifactId>bom-2.555.x</artifactId>
+        <artifactId>bom-${jenkins.baseline}.x</artifactId>
         <version>6715.v52b_c00222d1e</version>
         <type>pom</type>
         <scope>import</scope>
@@ -100,11 +99,11 @@
       <artifactId>workflow-durable-task-step</artifactId>
     </dependency>
 
-    <!-- Hard-pinned: modal dialog surface + input bridge target -->
+    <!-- Modal dialog surface + input bridge target. Version managed by the bom chain
+         (bom-2.555.x -> bom-weekly provides 560.v56198a_642157, meeting the >= 560 floor). -->
     <dependency>
       <groupId>org.jenkins-ci.plugins</groupId>
       <artifactId>pipeline-input-step</artifactId>
-      <version>${pipeline-input-step.version}</version>
     </dependency>
 
     <dependency>

@@ -3,6 +3,7 @@ INTERACTIVE_INPUT_PLUGIN_REQUIREMENTS.md
 HOSTING.md
 SESSION_NOTES.md
 sample_ai/
+.cursor
 
 # Maven
 target/
