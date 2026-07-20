@@ -59,7 +59,7 @@
     <!-- commonmark is a third-party (non-plugin) library we intentionally bundle into the HPI for
          safe markdown rendering. It is not managed by the bom, so pin it and list it so strict
          bundling accepts it. -->
-    <commonmark.version>0.24.0</commonmark.version>
+    <commonmark.version>0.29.0</commonmark.version>
     <hpi.bundledArtifacts>commonmark</hpi.bundledArtifacts>
   </properties>
 
