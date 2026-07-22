@@ -23,7 +23,7 @@ import org.kohsuke.stapler.StaplerRequest2;
  * the {@code appearance.interactiveInputAppearance} path (verified against
  * {@code GlobalConfigurationCategoryConfigurator}).
  *
- * <p>Three independent on/off switches plus an icon chooser:
+ * <p>Look-and-feel switches plus an icon chooser:
  * <ul>
  *   <li>{@link #isNotificationCentre() notificationCentre} — the global bell (off by default). When
  *       on, it lists <em>all</em> answerable questions on the dashboard but scopes to the current
@@ -32,22 +32,18 @@ import org.kohsuke.stapler.StaplerRequest2;
  *       page, build-history "awaiting input" badge, per-build audit view). On by default.</li>
  *   <li>{@link #isJobPageBox() jobPageBox} — the large inline box on the job page. On by default;
  *       independently switchable so an operator can keep the badge/sidebar without the big box.</li>
+ *   <li>{@link #isTabNotificationBadge() tabNotificationBadge} — on by default. Mirrors the viewer's
+ *       pending count in the browser tab (a "(N)" title prefix and a small dot painted on top of the
+ *       existing favicon) when the header bell is enabled. It never replaces the site favicon, so a
+ *       custom favicon (e.g. from the Simple Theme plugin) is preserved.</li>
  *   <li>{@link #getIcon() icon} — which Ionicon represents interactive input across the bell, badge
  *       and sidebar.</li>
  * </ul>
  *
- * <p>Two further switches govern <em>who</em> sees and answers a notification (§user-scoped surfaces):
- * <ul>
- *   <li>{@link #isUserScopedNotifications() userScopedNotifications} — off by default (everyone who
- *       may answer sees a question). When on, the notification surfaces show a question only to the
- *       user who started the owning build; builds with no human starter (SCM/timer/upstream/system)
- *       stay visible to everyone since there is no owner to scope to.</li>
- *   <li>{@link #isLockToBuildStarter() lockToBuildStarter} — off by default. When on, only the build
- *       starter (or a Jenkins administrator) may <em>answer</em>; everyone else who could see it can
- *       still read it but the modal controls are locked. Builds with no human starter are not locked
- *       (otherwise no one could answer them). This is an additional restriction layered on top of the
- *       existing Job/Build permission and {@code submitterFilter} checks, never a relaxation.</li>
- * </ul>
+ * <p>The authorization switches that govern <em>who</em> may see/answer a question
+ * ({@code userScopedNotifications}, {@code lockToBuildStarter}) are <strong>not</strong> look-and-feel
+ * and live under <em>Manage Jenkins → System</em> in {@link InteractiveInputGlobalConfig}
+ * ({@code unclassified.interactiveInput}), per Jenkins core guidance (review item B18).
  */
 @Extension
 @Symbol("interactiveInputAppearance")
@@ -57,21 +53,19 @@ public class InteractiveInputAppearanceConfig extends GlobalConfiguration {
     public static final List<String> ICON_CHOICES = List.of(
             "chatbubble-ellipses",
             "hand-left",
-            "person-circle",
             "git-pull-request",
             "megaphone",
             "hourglass",
             "alert-circle",
             "notifications");
 
-    /** Default icon: a speech bubble conveying "awaiting your response". */
-    public static final String DEFAULT_ICON = "chatbubble-ellipses";
+    /** Default icon: a megaphone conveying "needs attention / announcement". */
+    public static final String DEFAULT_ICON = "megaphone";
 
     private boolean notificationCentre;
     private boolean perProjectCentre = true;
     private boolean jobPageBox = true;
-    private boolean userScopedNotifications;
-    private boolean lockToBuildStarter;
+    private boolean tabNotificationBadge = true;
 
     @NonNull
     private String icon = DEFAULT_ICON;
@@ -125,23 +119,13 @@ public class InteractiveInputAppearanceConfig extends GlobalConfiguration {
         save();
     }
 
-    public boolean isUserScopedNotifications() {
-        return userScopedNotifications;
+    public boolean isTabNotificationBadge() {
+        return tabNotificationBadge;
     }
 
     @DataBoundSetter
-    public void setUserScopedNotifications(boolean userScopedNotifications) {
-        this.userScopedNotifications = userScopedNotifications;
-        save();
-    }
-
-    public boolean isLockToBuildStarter() {
-        return lockToBuildStarter;
-    }
-
-    @DataBoundSetter
-    public void setLockToBuildStarter(boolean lockToBuildStarter) {
-        this.lockToBuildStarter = lockToBuildStarter;
+    public void setTabNotificationBadge(boolean tabNotificationBadge) {
+        this.tabNotificationBadge = tabNotificationBadge;
         save();
     }
 
@@ -193,16 +177,10 @@ public class InteractiveInputAppearanceConfig extends GlobalConfiguration {
         return c == null || c.isJobPageBox();
     }
 
-    /** @return whether notification surfaces are scoped to the build starter. Off by default. */
-    public static boolean userScopedNotificationsEnabled() {
+    /** @return whether the browser-tab pending badge (title + favicon dot) is enabled. On by default. */
+    public static boolean tabNotificationBadgeEnabled() {
         InteractiveInputAppearanceConfig c = get();
-        return c != null && c.isUserScopedNotifications();
-    }
-
-    /** @return whether only the build starter (or an admin) may answer. Off by default. */
-    public static boolean lockToBuildStarterEnabled() {
-        InteractiveInputAppearanceConfig c = get();
-        return c != null && c.isLockToBuildStarter();
+        return c == null || c.isTabNotificationBadge();
     }
 
     /** @return the configured icon's symbol class, or the default's when unconfigured. */
@@ -218,7 +196,6 @@ public class InteractiveInputAppearanceConfig extends GlobalConfiguration {
         ListBoxModel m = new ListBoxModel();
         m.add("Speech bubble — awaiting your response", "chatbubble-ellipses");
         m.add("Raised hand — human action needed", "hand-left");
-        m.add("Person — human-in-the-loop", "person-circle");
         m.add("Pull request — approval / review gate", "git-pull-request");
         m.add("Megaphone — needs attention", "megaphone");
         m.add("Hourglass — waiting / pending decision", "hourglass");
@@ -233,8 +210,7 @@ public class InteractiveInputAppearanceConfig extends GlobalConfiguration {
         this.notificationCentre = false;
         this.perProjectCentre = false;
         this.jobPageBox = false;
-        this.userScopedNotifications = false;
-        this.lockToBuildStarter = false;
+        this.tabNotificationBadge = false;
         this.icon = DEFAULT_ICON;
         req.bindJSON(this, json);
         save();

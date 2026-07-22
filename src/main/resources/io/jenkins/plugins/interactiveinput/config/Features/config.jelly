@@ -41,11 +41,10 @@
     </f:description>
   </f:entry>
 
-  <f:entry>
-    <f:checkbox field="dashboardTile" title="Dashboard tile"/>
-    <f:description>
-      Reserved for a future dashboard summary tile. Off by default.
-    </f:description>
-  </f:entry>
+  <!--
+    The "Dashboard tile" (dashboardTile) feature is not implemented yet, so its toggle is intentionally
+    not rendered here (hosting review B19: don't expose UI for unavailable features). The field remains
+    on Features so a JCasC/Script-Console value still round-trips; re-add the entry when the tile ships.
+  -->
 
 </j:jelly>

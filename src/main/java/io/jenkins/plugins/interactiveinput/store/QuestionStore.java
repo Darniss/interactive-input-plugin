@@ -9,7 +9,7 @@ import hudson.model.Item;
 import hudson.model.Job;
 import hudson.model.User;
 import hudson.security.SecurityRealm;
-import io.jenkins.plugins.interactiveinput.config.InteractiveInputAppearanceConfig;
+import io.jenkins.plugins.interactiveinput.config.InteractiveInputGlobalConfig;
 import io.jenkins.plugins.interactiveinput.model.Answer;
 import io.jenkins.plugins.interactiveinput.model.Choice;
 import io.jenkins.plugins.interactiveinput.model.Question;
@@ -138,6 +138,39 @@ public class QuestionStore {
         save();
         LOGGER.log(Level.INFO, "question {0} answered by {1} via {2} (choice={3}, freeText={4})",
                 new Object[] {questionId, byUserId, source, choiceId, freeText != null});
+        fire(QuestionStatus.ANSWERED, q);
+        resolve(q);
+        return a;
+    }
+
+    /**
+     * Record an {@code input}-style parameter answer and resume the pipeline (B24). Callers must
+     * pre-check permissions and pre-validate/convert the values (the REST/UI layer's responsibility);
+     * this method assumes the caller is authorised and the values are already the resolved
+     * {@code ParameterValue.getValue()} objects. Only parameter names are logged — never values, so a
+     * password parameter is not leaked.
+     *
+     * @throws IllegalStateException if the question is missing or already settled
+     */
+    @NonNull
+    public Answer answerParameters(
+            @NonNull String questionId,
+            @NonNull Map<String, Object> parameterValues,
+            @NonNull String byUserId,
+            @NonNull String source) {
+        Question q = require(questionId);
+        Answer a;
+        synchronized (q) {
+            if (q.getStatus().isTerminal()) {
+                throw new IllegalStateException("Question " + questionId + " is already " + q.getStatus());
+            }
+            a = new Answer(questionId, null, null, parameterValues, byUserId, System.currentTimeMillis());
+            q.markAnswered(a);
+        }
+        save();
+        LOGGER.log(Level.INFO, "question {0} answered by {1} via {2} ({3} parameter(s): {4})", new Object[] {
+            questionId, byUserId, source, parameterValues.size(), parameterValues.keySet()
+        });
         fire(QuestionStatus.ANSWERED, q);
         resolve(q);
         return a;
@@ -383,8 +416,8 @@ public class QuestionStore {
      *     (drives the build-history badge, honouring user-scope and lock).
      */
     public boolean hasNotificationForBuild(@NonNull String jobFullName, int buildNumber) {
-        boolean userScoped = InteractiveInputAppearanceConfig.userScopedNotificationsEnabled();
-        boolean lock = InteractiveInputAppearanceConfig.lockToBuildStarterEnabled();
+        boolean userScoped = InteractiveInputGlobalConfig.userScopedNotificationsEnabled();
+        boolean lock = InteractiveInputGlobalConfig.lockToBuildStarterEnabled();
         String uid = currentUserId();
         for (Question q : questions.values()) {
             if (q.getStatus() == QuestionStatus.WAITING
@@ -399,8 +432,8 @@ public class QuestionStore {
 
     @NonNull
     private List<Question> collectNotifications(@CheckForNull String jobFullName) {
-        boolean userScoped = InteractiveInputAppearanceConfig.userScopedNotificationsEnabled();
-        boolean lock = InteractiveInputAppearanceConfig.lockToBuildStarterEnabled();
+        boolean userScoped = InteractiveInputGlobalConfig.userScopedNotificationsEnabled();
+        boolean lock = InteractiveInputGlobalConfig.lockToBuildStarterEnabled();
         String uid = currentUserId();
         List<Question> out = new ArrayList<>();
         for (Question q : questions.values()) {
@@ -465,7 +498,7 @@ public class QuestionStore {
         if (!canAnswer(q)) {
             return false;
         }
-        if (!InteractiveInputAppearanceConfig.lockToBuildStarterEnabled()) {
+        if (!InteractiveInputGlobalConfig.lockToBuildStarterEnabled()) {
             return true;
         }
         Jenkins j = Jenkins.get();

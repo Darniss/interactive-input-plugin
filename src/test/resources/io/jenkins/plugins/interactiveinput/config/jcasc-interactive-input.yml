@@ -11,11 +11,12 @@ unclassified:
     sla:
       defaultMinutes: 5
     retentionDays: 14
+    userScopedNotifications: true
+    lockToBuildStarter: true
 appearance:
   interactiveInputAppearance:
     notificationCentre: true
     perProjectCentre: true
     jobPageBox: false
-    userScopedNotifications: true
-    lockToBuildStarter: true
+    tabNotificationBadge: false
     icon: "hand-left"

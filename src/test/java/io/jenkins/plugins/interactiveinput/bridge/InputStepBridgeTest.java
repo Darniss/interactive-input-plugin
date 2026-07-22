@@ -61,7 +61,8 @@ class InputStepBridgeTest {
         QuestionStore store = QuestionStore.get();
         Question q = onlyBridged(store);
 
-        // The modal's "Deny" button submits the sentinel deny choice; the bridge must abort the input.
+        // The deny sentinel on a bridged mirror (the modal's "Continue" path, or any REST client) must
+        // forward as a native abort — as does an explicit /abort, which settles the mirror ABORTED.
         store.answer(
                 q.getId(),
                 io.jenkins.plugins.interactiveinput.model.Answer.DENY_CHOICE_ID,
@@ -71,6 +72,30 @@ class InputStepBridgeTest {
 
         j.waitForCompletion(b);
         j.assertBuildStatus(Result.ABORTED, b);
+    }
+
+    @Test
+    void parameterizedInputMirrorsWithNoChoicesAndLinksToInputPage(JenkinsRule j) throws Exception {
+        // B27: a native input that declares parameters cannot be answered by a plain proceed, so it is
+        // mirrored with NO choices (and no free text). The mirror carries a context link to the build's
+        // own input page; ApiRootAction turns that same target into the modal's forwardUrl so the user
+        // is forwarded there instead of dead-ending on "Pick a choice or type an answer".
+        enableBridge(true);
+        WorkflowRun b = startPausedAtInput(
+                j, "params", "input message: 'Need params', parameters: [string(name: 'ENV', defaultValue: 'dev')]");
+
+        InputStepBridge.get().sync();
+        QuestionStore store = QuestionStore.get();
+        Question q = onlyBridged(store);
+        assertTrue(q.isBridged(), "mirror must be flagged as bridged");
+        assertTrue(q.getChoices().isEmpty(), "a parameterized native input must be mirrored with no choices");
+        assertFalse(q.isAllowFreeText(), "a parameterized native input mirror offers no free text either");
+        assertNotNull(q.getContextMd(), "the mirror must explain how to answer a parameterized input");
+        assertTrue(q.getContextMd().contains("input/"), "context must link to the build's input page: " + q.getContextMd());
+
+        // Clean up the still-pending native input to end the build.
+        b.getAction(InputAction.class).getExecutions().get(0).doAbort();
+        j.waitForCompletion(b);
     }
 
     @Test

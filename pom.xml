@@ -39,9 +39,11 @@
   <properties>
     <changelist>999999-SNAPSHOT</changelist>
     <!-- Baseline: https://www.jenkins.io/doc/developer/plugin-development/choosing-jenkins-baseline/
-         The test server core is 2.555.2 (verified 2026-07-19), so target that patch. -->
-    <jenkins.baseline>2.555</jenkins.baseline>
-    <jenkins.version>${jenkins.baseline}.2</jenkins.version>
+         Bumped to 2.568 for the native Jenkins dialog component, which is core >= 2.560 (review
+         item B8). The live server was upgraded to 2.568.1 (verified 2026-07-21), so target that
+         patch; move to .3 once 2.568.3 ships (2026-09-02). -->
+    <jenkins.baseline>2.568</jenkins.baseline>
+    <jenkins.version>${jenkins.baseline}.1</jenkins.version>
     <gitHubRepo>jenkinsci/interactive-input-plugin</gitHubRepo>
 
     <!-- Enforcer bans required for hosting. Verified clean: tests are JUnit 5 only, main code uses
@@ -50,17 +52,14 @@
     <ban-deprecated-stapler.skip>false</ban-deprecated-stapler.skip>
     <ban-commons-lang-2.skip>false</ban-commons-lang-2.skip>
     <banObsoleteDependencyOverrides.skip>false</banObsoleteDependencyOverrides.skip>
+    <!-- No third-party jars are bundled into the HPI (commonmark now comes from the markdown-formatter
+         plugin dependency — see below and review item B12), so keep strict bundling on with no
+         allowlist: the build fails if any non-plugin artifact is ever packed again. -->
     <hpi.strictBundledArtifacts>true</hpi.strictBundledArtifacts>
 
     <!-- Formatting is enforced in CI once `mvn spotless:apply` has been run in a Maven
          environment; keep it disabled until then so CD is not blocked on formatting. -->
     <spotless.check.skip>true</spotless.check.skip>
-
-    <!-- commonmark is a third-party (non-plugin) library we intentionally bundle into the HPI for
-         safe markdown rendering. It is not managed by the bom, so pin it and list it so strict
-         bundling accepts it. -->
-    <commonmark.version>0.24.0</commonmark.version>
-    <hpi.bundledArtifacts>commonmark</hpi.bundledArtifacts>
   </properties>
 
   <dependencyManagement>
@@ -100,7 +99,7 @@
     </dependency>
 
     <!-- Modal dialog surface + input bridge target. Version managed by the bom chain
-         (bom-2.555.x -> bom-weekly provides 560.v56198a_642157, meeting the >= 560 floor). -->
+         (bom-2.568.x); the 2.568 baseline also provides core's native dialog component (B8). -->
     <dependency>
       <groupId>org.jenkins-ci.plugins</groupId>
       <artifactId>pipeline-input-step</artifactId>
@@ -129,11 +128,16 @@
       <optional>true</optional>
     </dependency>
 
-    <!-- Safe markdown rendering (context + free-text preview). Raw HTML is escaped. -->
+    <!-- Safe markdown rendering (context + free-text preview). The markdown-formatter plugin ships
+         commonmark, so we depend on the plugin rather than packing the commonmark jar into our own HPI
+         (review item B12). MarkdownRenderer still drives commonmark's API directly (escapeHtml +
+         sanitizeUrls) to keep our hardened, escape-by-default output — the plugin only provides the
+         library on the classpath. Not managed by the bom, so the version is pinned; its requiredCore
+         (2.528.3) is well below our 2.568 baseline. -->
     <dependency>
-      <groupId>org.commonmark</groupId>
-      <artifactId>commonmark</artifactId>
-      <version>${commonmark.version}</version>
+      <groupId>io.jenkins.plugins</groupId>
+      <artifactId>markdown-formatter</artifactId>
+      <version>346.v3c6828ddd39e</version>
     </dependency>
 
     <!-- ===== test scope ===== -->

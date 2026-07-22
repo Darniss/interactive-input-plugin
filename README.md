@@ -2,8 +2,8 @@
 
 > A notification bell and a rich human‑in‑the‑loop (HITL) modal for Jenkins pipelines that pause for a human decision — plus a language‑agnostic REST API so any external agent (a bot, a script, an AI copilot) can answer on a human's behalf.
 
-[![Jenkins](https://img.shields.io/badge/Jenkins-2.555.2%2B-d24939?logo=jenkins&logoColor=white)](https://www.jenkins.io/)
-[![Java](https://img.shields.io/badge/Java-17%2B-007396?logo=openjdk&logoColor=white)](https://adoptium.net/)
+[![Jenkins](https://img.shields.io/badge/Jenkins-2.568.1%2B-d24939?logo=jenkins&logoColor=white)](https://www.jenkins.io/)
+[![Java](https://img.shields.io/badge/Java-21-007396?logo=openjdk&logoColor=white)](https://adoptium.net/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-2ea44f.svg)](LICENSE)
 [![Pipeline](https://img.shields.io/badge/Pipeline-durable-3f7cac.svg)](https://www.jenkins.io/doc/book/pipeline/)
 [![JCasC](https://img.shields.io/badge/JCasC-ready-6f42c1.svg)](https://www.jenkins.io/projects/jcasc/)
@@ -16,7 +16,6 @@
 - [`input` vs `interactive-input`](#input-vs-interactive-input)
 - [Features](#features)
 - [How it works](#how-it-works)
-- [Install](#install)
 - [Quick start](#quick-start)
 - [The `askInteractive` step](#the-askinteractive-step)
 - [Human-in-the-loop scenarios](#human-in-the-loop-scenarios)
@@ -76,7 +75,7 @@ Both pause a pipeline and wait for a human. Here is what changes:
 
 - 📍 **Per‑project notification centre** — notifications surface *where the work is*, not at one Jenkins‑wide point: a box + sidebar page on each pipeline/job listing its pending questions, an "awaiting input" badge next to the relevant build in the build‑history list, and a per‑build audit view. On by default (`perProjectCentre`, under **Appearance**). The inline job‑page box has its **own** on/off switch (`jobPageBox`, on by default) so you can keep the badge + sidebar without the big box.
 - 👁️ **Attention pulse** — the build‑history "awaiting input" badge and the job‑page box title **blink slowly in red** to catch the eye, with a `prefers-reduced-motion` fallback that disables the animation for motion‑sensitive users.
-- 🎛️ **Choosable notification icon** — pick the icon used across the bell, badge and sidebar from eight meaning‑matched Ionicons (speech bubble *(default)*, raised hand, person, pull‑request, megaphone, hourglass, alert, classic bell) under **Appearance**.
+- 🎛️ **Choosable notification icon** — pick the icon used across the bell, badge and sidebar from seven meaning‑matched Ionicons (megaphone *(default)*, speech bubble, raised hand, pull‑request, hourglass, alert, classic bell) under **Appearance**.
 - 👤 **Attribution** — every surface shows **who started the build** ("started by &lt;user&gt;", or `scm`/`timer`/`upstream`/`system`), so reviewers can tell whose job is waiting.
 - 🔗 **Console audit link** — like the built‑in `input`, the build log gets an anchored link at the point of invocation; clicking it opens the audit view showing what was displayed and what was chosen. The flow node is also marked **Paused** so stage/flow views reflect the wait, and the outcome (answered/aborted/expired, by whom) is logged.
 - 🔔 **Global notification bell** — an optional header badge with the count of questions *you* can answer, polled at a configurable cadence (no WebSocket/SSE, so it works through every corporate proxy). **Context‑scoped**: on the dashboard it lists **every** answerable question; inside a pipeline (a job/build page) it narrows to **that pipeline's** questions. **Off by default** (`notificationCentre`, under **Appearance**); anchored into the header controls (with a bottom‑right floating fallback) so it never overlaps the settings gear.
@@ -111,26 +110,6 @@ flowchart LR
 ```
 
 A paused step registers a `Question` in a durable, permission‑aware `QuestionStore`. The bell polls the REST API for questions the current user may answer; the modal (or any external agent) answers via `POST …/answer`; the store resolves the question and the pipeline resumes, throws (`abort`), or times out (SLA). Question metadata survives a controller restart via XStream; transient resolvers are re‑attached on step resume.
-
----
-
-## Install
-
-**Requirements:** Jenkins **2.555.2+**, Java **17+**, and `pipeline-input-step` **≥ 560** (see [compatibility](#compatibility-matrix)).
-
-### From the built HPI
-
-1. **Manage Jenkins → Plugins → Advanced → Deploy Plugin** and upload `interactive-input.hpi`, **or** drop the HPI into `$JENKINS_HOME/plugins/` and restart.
-2. Confirm the bell appears and the health probe answers:
-
-```bash
-curl -s http://<jenkins>/interactive-input/api/v1/health
-# {"status":"ok","pending":0}
-```
-
-### From the Update Center
-
-Once published to [plugins.jenkins.io](https://plugins.jenkins.io/), search **"Interactive Input"** in **Manage Jenkins → Plugins → Available**.
 
 ---
 
@@ -433,9 +412,10 @@ A visual tour of where to configure the plugin and what it looks like in use. (T
 - **Global notification centre (header bell)** — turns on the header bell. On the **dashboard** it lists **every** question you can answer; **inside a pipeline** (a job/build page) it narrows to **that pipeline's** questions. *Off by default*, so notifications surface per pipeline / per build rather than at one Jenkins-wide point.
 - **Per-project notification centre** — the per-pipeline / per-build surfaces: a sidebar page on each job, an "awaiting input" badge next to the waiting build in the build-history list, and the per-build audit view. *On by default.*
 - **Show the inline box on the job page** — the large "Interactive Input" box on a job/pipeline page while it has a pending question. Turn it off to keep the badge + sidebar page **without** the big box. *On by default* (requires the per-project centre above).
-- **Show each user only their own build's notifications** — when on, every surface shows a question **only to the user who started the owning build**. Builds started by SCM, a timer, an upstream job, or the system have no human owner, so they stay visible to everyone. *Off by default* (everyone who may answer sees it).
-- **Only the build starter may answer (others can view)** — when on, only the build's starter (or a Jenkins administrator) can **submit** an answer; everyone else sees the question read-only with the controls locked. This is an *extra* restriction layered on top of the usual Job/Build + submitter checks — it never grants access. *Off by default.*
-- **Notification icon** — the icon used across the bell, badge, and sidebar link, chosen from eight meaning-matched Ionicons (speech bubble *(default)*, raised hand, person, pull-request, megaphone, hourglass, alert, classic bell). The capture above is set to **Raised hand — human action needed**.
+- **Show a pending-count badge in the browser tab** — when on (and the header bell above is enabled), the number of questions you can answer is mirrored in the browser tab. If the site favicon is **same-origin**, a small red dot is painted **on top of** it (the tab title is left unchanged); if the favicon is **cross-origin or missing** — a browser cannot read its pixels into a canvas, e.g. a favicon hosted on another domain via the Simple Theme plugin — it falls back to a red-circle + "(N)" prefix on the tab **title**. Either way it never replaces the site favicon. *On by default.*
+- **Notification icon** — the icon used across the bell, badge, and sidebar link, chosen from seven meaning-matched Ionicons (megaphone *(default)*, speech bubble, raised hand, pull-request, hourglass, alert, classic bell). The capture above is set to **Raised hand — human action needed**.
+
+> The two authorization switches that govern *who* may see and answer a question — **Show each user only their own build's notifications** and **Only the build starter may answer (others can view)** — are functional (not look-and-feel) settings and now live under **Manage Jenkins → System → Interactive Input** (see [Configuration](#configuration-ui--jcasc)).
 
 ### Per-pipeline notifications *(preview — not yet delivered)*
 
@@ -460,8 +440,8 @@ This is the **per-build audit view** — the compliance trail for every human-in
 
 Settings are split in two, following Jenkins core guidance to keep look‑and‑feel out of functional config:
 
-- **Functional flags** live under **Manage Jenkins → System → Interactive Input** (`unclassified.interactiveInput`).
-- **Notification‑surface visibility** (the global bell + its scoping, the per‑project centre, the job‑page box, and the icon) lives under **Manage Jenkins → Appearance → Interactive Input** (`appearance.interactiveInputAppearance`).
+- **Functional flags** — the feature toggles, polling/SLA/retention, and the two **authorization** switches (user‑scoped notifications, lock‑to‑build‑starter) live under **Manage Jenkins → System → Interactive Input** (`unclassified.interactiveInput`).
+- **Notification‑surface visibility** (the global bell + its scoping, the per‑project centre, the job‑page box, the browser‑tab badge, and the icon) lives under **Manage Jenkins → Appearance → Interactive Input** (`appearance.interactiveInputAppearance`).
 
 ```yaml
 unclassified:
@@ -477,6 +457,9 @@ unclassified:
     sla:
       defaultMinutes: 0          # default SLA when a step omits slaMinutes (0 = no SLA)
     retentionDays: 7             # keep answered/aborted/expired questions this long
+    # Authorization (default off; only ever RESTRICT access on top of the Job/Build + submitter checks)
+    userScopedNotifications: false     # show each viewer only their own build's questions (+ ownerless)
+    lockToBuildStarter: false          # only the build starter (or an admin) may answer; others view-only
 
 # Look-and-feel — Manage Jenkins → Appearance → Interactive Input
 appearance:
@@ -485,8 +468,9 @@ appearance:
                                        # answerable questions; inside a pipeline = only that pipeline's.
     perProjectCentre: true             # per-project surfaces (sidebar page, build badge, audit view)
     jobPageBox: true                   # the large inline box on the job page (independent of the badge)
-    icon: "chatbubble-ellipses"        # one of: chatbubble-ellipses, hand-left, person-circle,
-                                       # git-pull-request, megaphone, hourglass, alert-circle, notifications
+    tabNotificationBadge: true         # mirror the pending count in the browser tab (favicon dot if same-origin, else title)
+    icon: "megaphone"                  # one of: chatbubble-ellipses, hand-left, git-pull-request,
+                                       # megaphone, hourglass, alert-circle, notifications
 ```
 
 Defaults: the step, **per‑project notification centre**, the **job‑page box**, the modal, and the REST
@@ -520,7 +504,7 @@ See [`docs/SECURITY.md`](docs/SECURITY.md) for the threat model and how to repor
 
 | # | Restriction | Why |
 |---|---|---|
-| 1 | Jenkins **2.555.2+**, Java **17+** | Built against the 2.555.x BOM on Java 17 bytecode. |
+| 1 | Jenkins **2.568.1+**, Java **21** | Built against the 2.568.x BOM; the 2.568 baseline requires Java 21. |
 | 2 | `pipeline-input-step` **≥ 560** | The bridge/modal target the dialog surface added in 560. |
 | 3 | `askInteractive` runs in **Pipeline** jobs (not Freestyle) | It's a pipeline step; Freestyle has no step model. Freestyle/other jobs can still use the **REST API**. |
 | 4 | Notifications are **polled**, not pushed | No SSE/WebSocket in v0.1 (proxy‑friendly by design). Cadence ≥ 5s. |
@@ -533,8 +517,8 @@ See [`docs/SECURITY.md`](docs/SECURITY.md) for the threat model and how to repor
 
 | Component | Version | Notes |
 |---|---|---|
-| Jenkins core | `2.555.2+` | pinned via `bom-2.555.x` |
-| Java | `17` (built on JDK 21) | `maven.compiler.release=17` |
+| Jenkins core | `2.568.1+` | pinned via `bom-2.568.x` |
+| Java | `21` | required by the 2.568 baseline |
 | `pipeline-input-step` | `≥ 560.v56198a_642157` | **hard requirement** (modal + bridge) |
 | `configuration-as-code` | optional | JCasC is optional at runtime |
 | `commonmark` | `0.24.0` | bundled in the HPI for safe Markdown |
@@ -546,7 +530,7 @@ Full dependency inventory: [`docs/BILL_OF_MATERIALS.md`](docs/BILL_OF_MATERIALS.
 ## Build from source
 
 ```bash
-# Requires JDK 17+ and Maven 3.8.6+
+# Requires JDK 21+ and Maven 3.8.6+
 mvn -B -ntp clean verify      # runs the full test suite + SpotBugs
 ls target/interactive-input.hpi
 ```

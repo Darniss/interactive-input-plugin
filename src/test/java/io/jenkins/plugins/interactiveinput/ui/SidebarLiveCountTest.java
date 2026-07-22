@@ -18,10 +18,11 @@ import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
  * Regression guard for the left-sidebar "Interactive Input (N)" count going stale until a full page
  * reload (§side-nav live update).
  *
- * <p>The count in the sidebar link is server-rendered by {@link InteractiveInputJobAction#getDisplayName()},
- * so it only changed on reload. The fix keeps it live client-side by always rendering an invisible
- * {@code [data-ii-tasklink]} controller in {@code jobMain.jelly} (even at zero) that {@code bell.js}
- * uses to re-label and hide/show the row as the scoped count changes.
+ * <p>The sidebar link is server-rendered by {@link InteractiveInputJobAction} (label + icon) and the
+ * pending count is a native {@code jenkins-badge} pill added client-side, so the number only changed on
+ * reload. The fix keeps it live by always rendering an invisible {@code [data-ii-tasklink]} controller
+ * in {@code jobMain.jelly} (even at zero) that {@code bell.js} uses to update the badge and hide/show
+ * the row as the scoped count changes.
  *
  * <p>JavaScript is disabled here on purpose: we assert the <em>server-rendered</em> DOM hooks the poller
  * needs (the always-present controller with the correct {@code data-job}/{@code data-initial-count}) and
@@ -46,12 +47,15 @@ class SidebarLiveCountTest {
                 System.currentTimeMillis(), false));
 
         // With one pending, the page must carry the always-present live controller AND the server-rendered
-        // "(1)" label + visible sidebar link.
+        // sidebar link. The count is now a client-side jenkins-badge pill (see bell.js), so with
+        // JavaScript disabled we assert the server hooks + seed, not a "(1)" label.
         String pending = jobPageHtml(j, p);
         assertTrue(pending.contains("data-ii-tasklink=\"job\""), "always-present tasklink controller must render");
         assertTrue(pending.contains("data-job=\"" + JOB + "\""), "controller must be scoped to this job");
         assertTrue(pending.contains("data-initial-count=\"1\""), "controller seeds the live count from the server");
-        assertTrue(pending.contains("Interactive Input (1)"), "sidebar label carries the server-rendered count");
+        assertFalse(
+                pending.contains("Interactive Input (1)"),
+                "the count is a client-side jenkins-badge pill now, not baked into the sidebar label");
 
         // Draining the store is exactly what the client poller observes: count -> 0, link hidden. The
         // controller stays in the DOM (seeded at 0) so the poller can re-show it if a new question arrives.
@@ -62,7 +66,7 @@ class SidebarLiveCountTest {
         String drained = jobPageHtml(j, p);
         assertTrue(drained.contains("data-ii-tasklink=\"job\""), "controller stays present at zero for live re-show");
         assertTrue(drained.contains("data-initial-count=\"0\""), "controller reseeds at zero");
-        assertFalse(drained.contains("Interactive Input (1)"), "the stale '(1)' label must be gone");
+        assertFalse(drained.contains("Interactive Input (1)"), "no '(N)' text in the label — the count is a badge");
     }
 
     private static String jobPageHtml(JenkinsRule j, FreeStyleProject p) throws Exception {

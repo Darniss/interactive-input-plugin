@@ -50,4 +50,32 @@ class InteractiveInputGlobalConfigTest {
                 InteractiveInputGlobalConfig.get().getFeatures().isRestApi(),
                 "unchecking a flag must turn it off (configure() starts all-off before binding)");
     }
+
+    @Test
+    void authorizationSwitchesDefaultOffAndRoundTripThroughTheUi(JenkinsRule j) throws Exception {
+        // B18: userScopedNotifications + lockToBuildStarter moved here (System). Both default off.
+        InteractiveInputGlobalConfig cfg = InteractiveInputGlobalConfig.get();
+        assertNotNull(cfg);
+        assertFalse(cfg.isUserScopedNotifications(), "user-scoped notifications off by default");
+        assertFalse(cfg.isLockToBuildStarter(), "lock-to-build-starter off by default");
+        assertFalse(InteractiveInputGlobalConfig.userScopedNotificationsEnabled());
+        assertFalse(InteractiveInputGlobalConfig.lockToBuildStarterEnabled());
+
+        HtmlForm form = j.createWebClient().goTo("configure").getFormByName("config");
+        form.getInputByName("_.userScopedNotifications").setChecked(true);
+        form.getInputByName("_.lockToBuildStarter").setChecked(true);
+        j.submit(form);
+
+        assertTrue(InteractiveInputGlobalConfig.userScopedNotificationsEnabled(), "enabled via the System UI");
+        assertTrue(InteractiveInputGlobalConfig.lockToBuildStarterEnabled(), "enabled via the System UI");
+
+        // Unchecking turns them back off (configure() starts them off before binding).
+        HtmlForm form2 = j.createWebClient().goTo("configure").getFormByName("config");
+        form2.getInputByName("_.userScopedNotifications").setChecked(false);
+        form2.getInputByName("_.lockToBuildStarter").setChecked(false);
+        j.submit(form2);
+
+        assertFalse(InteractiveInputGlobalConfig.userScopedNotificationsEnabled());
+        assertFalse(InteractiveInputGlobalConfig.lockToBuildStarterEnabled());
+    }
 }

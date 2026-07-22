@@ -1,7 +1,7 @@
 package io.jenkins.plugins.interactiveinput.step;
 
-import hudson.AbortException;
-import hudson.console.HyperlinkNote;
+import hudson.Util;
+import hudson.model.Result;
 import hudson.model.Run;
 import hudson.model.TaskListener;
 import io.jenkins.plugins.interactiveinput.model.Answer;
@@ -11,14 +11,17 @@ import io.jenkins.plugins.interactiveinput.store.QuestionStore;
 import io.jenkins.plugins.interactiveinput.ui.InteractiveInputRunAction;
 import io.jenkins.plugins.interactiveinput.util.CauseResolver;
 import java.io.IOException;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeoutException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import jenkins.model.CauseOfInterruption;
 import org.jenkinsci.plugins.workflow.graph.FlowNode;
-import org.jenkinsci.plugins.workflow.support.actions.PauseAction;
 import org.jenkinsci.plugins.workflow.steps.AbstractStepExecutionImpl;
+import org.jenkinsci.plugins.workflow.steps.FlowInterruptedException;
 import org.jenkinsci.plugins.workflow.steps.StepContext;
+import org.jenkinsci.plugins.workflow.support.actions.PauseAction;
 
 /**
  * Durable, restart-safe execution for {@link AskInteractiveStep}.
@@ -73,17 +76,25 @@ public class AskInteractiveStepExecution extends AbstractStepExecutionImpl {
                 run.getNumber(),
                 CauseResolver.startedBy(run),
                 System.currentTimeMillis(),
-                false);
+                false,
+                step.getParameters());
 
         QuestionStore store = QuestionStore.get();
         store.submit(question);
         store.register(questionId, this::onResolved);
 
         if (listener != null) {
-            // Anchored link to the per-build audit page, like the built-in input step. The leading
-            // "/" is resolved against the context path by HyperlinkNote (verified against core).
-            String link = HyperlinkNote.encodeTo(
-                    "/" + run.getUrl() + InteractiveInputRunAction.URL_NAME + "/", "Open interactive input");
+            // B6: link straight to this question's dialog and open it IN PLACE. bell.js intercepts the
+            // click (via the data-ii-open attribute the note adds) and opens the shared native dialog on
+            // whatever page shows the link — including the build's Console Output — instead of first
+            // navigating to the audit page. The href stays a real deep-link (.../interactive-input/?open=
+            // <id>) so with JS off (or where bell.js is not loaded) the link still navigates to the audit
+            // page, which auto-opens the same dialog. The leading "/" is resolved against the context path
+            // by HyperlinkNote (verified against core); the audit page is Item.READ-gated and answering
+            // stays permission-checked server-side.
+            String target = "/" + run.getUrl() + InteractiveInputRunAction.URL_NAME + "/?open="
+                    + Util.rawEncode(questionId);
+            String link = OpenInteractiveInputNote.encodeTo(target, questionId, "Open interactive input");
             listener.getLogger().println(LOG_PREFIX + step.getPrompt() + " — waiting for a human answer. " + link);
         }
         markPaused(ctx);
@@ -101,8 +112,12 @@ public class AskInteractiveStepExecution extends AbstractStepExecutionImpl {
                 ctx.onSuccess(a != null ? a.toStepReturnValue() : null);
                 break;
             case ABORTED:
+                // B26: a denied/aborted input must abort the RUN like the built-in input step does —
+                // FlowInterruptedException(Result.ABORTED) marks the build ABORTED (not FAILED). Previously
+                // the modal's "Deny" resolved through the answer path (onSuccess), so the pipeline silently
+                // continued instead of aborting.
                 String by = q.getAnswer() != null ? q.getAnswer().getAnsweredBy() : "unknown";
-                ctx.onFailure(new AbortException("askInteractive aborted by " + by));
+                ctx.onFailure(new FlowInterruptedException(Result.ABORTED, new CauseOfInterruption.UserInterruption(by)));
                 break;
             case EXPIRED:
                 ctx.onFailure(new TimeoutException(
@@ -165,7 +180,15 @@ public class AskInteractiveStepExecution extends AbstractStepExecutionImpl {
             case ANSWERED:
                 String by = a != null ? a.getAnsweredBy() : "unknown";
                 if (a != null && a.isDeny()) {
-                    return "Denied by " + by;
+                    return "Denied by " + by + " — pipeline continued";
+                }
+                if (a != null && a.isSkip()) {
+                    return "Skipped by " + by + " — pipeline continued";
+                }
+                Map<String, Object> pv = a != null ? a.getParameterValues() : null;
+                if (pv != null && !pv.isEmpty()) {
+                    // Log only the parameter names (never values — a value may be a password).
+                    return "Answered by " + by + ": parameters " + pv.keySet();
                 }
                 if (a != null && a.getChoiceId() != null) {
                     return "Answered by " + by + ": " + choiceLabel(a.getChoiceId());

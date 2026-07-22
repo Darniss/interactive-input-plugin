@@ -25,32 +25,27 @@ class InteractiveInputAppearanceConfigTest {
         assertFalse(c.isNotificationCentre(), "global bell is off by default");
         assertTrue(c.isPerProjectCentre(), "per-project centre is on by default");
         assertTrue(c.isJobPageBox(), "job-page box is on by default");
-        assertFalse(c.isUserScopedNotifications(), "user-scoped notifications off by default");
-        assertFalse(c.isLockToBuildStarter(), "lock-to-build-starter off by default");
+        assertTrue(c.isTabNotificationBadge(), "browser-tab badge is on by default");
         assertEquals(InteractiveInputAppearanceConfig.DEFAULT_ICON, c.getIcon());
+        assertEquals("megaphone", c.getIcon(), "default notification icon is the megaphone");
 
         // Null-safe static helpers agree with the instance.
         assertFalse(InteractiveInputAppearanceConfig.notificationCentreEnabled());
         assertTrue(InteractiveInputAppearanceConfig.perProjectCentreEnabled());
         assertTrue(InteractiveInputAppearanceConfig.jobPageBoxEnabled());
-        assertFalse(InteractiveInputAppearanceConfig.userScopedNotificationsEnabled());
-        assertFalse(InteractiveInputAppearanceConfig.lockToBuildStarterEnabled());
+        assertTrue(InteractiveInputAppearanceConfig.tabNotificationBadgeEnabled());
     }
 
     @Test
-    void userScopeAndLockPersistThroughSetters(JenkinsRule j) {
+    void tabNotificationBadgePersistsThroughSetter(JenkinsRule j) {
         InteractiveInputAppearanceConfig c = InteractiveInputAppearanceConfig.get();
         assertNotNull(c);
 
-        c.setUserScopedNotifications(true);
-        c.setLockToBuildStarter(true);
-        assertTrue(InteractiveInputAppearanceConfig.userScopedNotificationsEnabled());
-        assertTrue(InteractiveInputAppearanceConfig.lockToBuildStarterEnabled());
+        c.setTabNotificationBadge(false);
+        assertFalse(InteractiveInputAppearanceConfig.tabNotificationBadgeEnabled());
 
-        c.setUserScopedNotifications(false);
-        c.setLockToBuildStarter(false);
-        assertFalse(InteractiveInputAppearanceConfig.userScopedNotificationsEnabled());
-        assertFalse(InteractiveInputAppearanceConfig.lockToBuildStarterEnabled());
+        c.setTabNotificationBadge(true);
+        assertTrue(InteractiveInputAppearanceConfig.tabNotificationBadgeEnabled());
     }
 
     @Test

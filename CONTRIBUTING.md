@@ -5,7 +5,7 @@ and the pull-request flow.
 
 ## Prerequisites
 
-- **JDK 17+** (the CI/reference build uses JDK 21, targeting Java 17 bytecode).
+- **JDK 21+** (the 2.568 baseline requires Java 21; the CI/reference build uses JDK 21).
 - **Maven 3.8.6+**.
 - Network access to `https://repo.jenkins-ci.org/public/` (behind a corporate proxy, configure
   `~/.m2/settings.xml` — see [`SESSION_NOTES.md`](SESSION_NOTES.md)).

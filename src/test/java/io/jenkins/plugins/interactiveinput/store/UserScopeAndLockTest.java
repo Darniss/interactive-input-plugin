@@ -9,7 +9,7 @@ import hudson.model.Item;
 import hudson.model.User;
 import hudson.security.ACL;
 import hudson.security.ACLContext;
-import io.jenkins.plugins.interactiveinput.config.InteractiveInputAppearanceConfig;
+import io.jenkins.plugins.interactiveinput.config.InteractiveInputGlobalConfig;
 import io.jenkins.plugins.interactiveinput.model.Choice;
 import io.jenkins.plugins.interactiveinput.model.Question;
 import java.util.List;
@@ -35,7 +35,7 @@ class UserScopeAndLockTest {
     @Test
     void userScopeShowsOnlyOwnBuildsPlusOwnerlessOnes(JenkinsRule j) throws Exception {
         QuestionStore store = seed(j);
-        appearance().setUserScopedNotifications(true);
+        config().setUserScopedNotifications(true);
 
         as("alice", () -> {
             assertEquals(2, store.countNotifications(), "alice sees her own (qA) plus the ownerless qT");
@@ -58,7 +58,7 @@ class UserScopeAndLockTest {
     @Test
     void lockLetsOthersSeeButNotAnswer(JenkinsRule j) throws Exception {
         QuestionStore store = seed(j);
-        appearance().setLockToBuildStarter(true);
+        config().setLockToBuildStarter(true);
 
         as("alice", () -> {
             // Lock surfaces readable questions (including others') so they are visible-but-locked.
@@ -76,7 +76,7 @@ class UserScopeAndLockTest {
     @Test
     void adminCanAlwaysAnswerEvenWhenLocked(JenkinsRule j) throws Exception {
         QuestionStore store = seed(j);
-        appearance().setLockToBuildStarter(true);
+        config().setLockToBuildStarter(true);
         as("admin", () -> {
             assertTrue(store.canAnswerEffective(store.get("qA")), "admin overrides the lock");
             assertTrue(store.canAnswerEffective(store.get("qB")), "admin overrides the lock");
@@ -86,8 +86,8 @@ class UserScopeAndLockTest {
     @Test
     void userScopeAndLockTogetherShowOnlyOwnAndAnswerable(JenkinsRule j) throws Exception {
         QuestionStore store = seed(j);
-        appearance().setUserScopedNotifications(true);
-        appearance().setLockToBuildStarter(true);
+        config().setUserScopedNotifications(true);
+        config().setLockToBuildStarter(true);
         as("alice", () -> {
             assertEquals(2, store.listNotifications().size(), "only alice's own build plus the ownerless one");
             assertTrue(store.canAnswerEffective(store.get("qA")));
@@ -98,8 +98,8 @@ class UserScopeAndLockTest {
 
     // ---- helpers ----
 
-    private static InteractiveInputAppearanceConfig appearance() {
-        InteractiveInputAppearanceConfig c = InteractiveInputAppearanceConfig.get();
+    private static InteractiveInputGlobalConfig config() {
+        InteractiveInputGlobalConfig c = InteractiveInputGlobalConfig.get();
         assertNotNull(c);
         return c;
     }

@@ -4,8 +4,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import hudson.model.ChoiceParameterDefinition;
+import hudson.model.FreeStyleProject;
 import hudson.model.Item;
-import io.jenkins.plugins.interactiveinput.config.InteractiveInputAppearanceConfig;
+import hudson.model.ParameterDefinition;
+import hudson.model.StringParameterDefinition;
 import io.jenkins.plugins.interactiveinput.config.InteractiveInputGlobalConfig;
 import io.jenkins.plugins.interactiveinput.model.Choice;
 import io.jenkins.plugins.interactiveinput.model.Question;
@@ -14,6 +17,7 @@ import io.jenkins.plugins.interactiveinput.store.QuestionStore;
 import java.net.URL;
 import java.util.List;
 import jenkins.model.Jenkins;
+import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
 import org.htmlunit.HttpMethod;
 import org.htmlunit.WebRequest;
@@ -134,7 +138,7 @@ class RestApiTest {
     @Test
     void lockToBuildStarterIsEnforcedOverRestAndExposedAsCanAnswer(JenkinsRule j) throws Exception {
         secure(j);
-        InteractiveInputAppearanceConfig.get().setLockToBuildStarter(true);
+        InteractiveInputGlobalConfig.get().setLockToBuildStarter(true);
         submit("q1", "builder"); // the build was started by "builder"
 
         // A non-owner who otherwise holds Item.BUILD can SEE it (lock surfaces readable questions) but
@@ -179,6 +183,104 @@ class RestApiTest {
         assertEquals(409, postJson(j.createWebClient().login("builder"), j, BASE + "questions/q1/answer", "{\"choiceId\":\"yes\"}"));
     }
 
+    @Test
+    void skipSentinelIsAcceptedAndResumes(JenkinsRule j) throws Exception {
+        secure(j);
+        submit("q1");
+        // B26: the skip sentinel (automation/AI) is valid even though it is not a declared choice of q1.
+        assertEquals(
+                200,
+                postJson(j.createWebClient().login("builder"), j, BASE + "questions/q1/answer", "{\"choiceId\":\"__skip__\"}"));
+        JSONObject q = json(get(j.createWebClient().login("builder"), j, BASE + "questions/q1"));
+        assertEquals("ANSWERED", q.getString("status"));
+        assertEquals("__skip__", q.getJSONObject("answer").getString("choiceId"));
+    }
+
+    @Test
+    void abortRequiresBuildPermissionAndSettlesAborted(JenkinsRule j) throws Exception {
+        secure(j);
+        submit("q1");
+        // B26 (Deny): reader (Item.READ, no Item.BUILD) may not abort.
+        assertEquals(403, postJson(j.createWebClient().login("reader"), j, BASE + "questions/q1/abort", "{}"));
+        // Builder may abort -> the question settles ABORTED (the step then aborts the run).
+        assertEquals(200, postJson(j.createWebClient().login("builder"), j, BASE + "questions/q1/abort", "{}"));
+        assertEquals(QuestionStatus.ABORTED, QuestionStore.get().get("q1").getStatus());
+        // Aborting an already-settled question -> 409.
+        assertEquals(409, postJson(j.createWebClient().login("builder"), j, BASE + "questions/q1/abort", "{}"));
+    }
+
+    @Test
+    void parameterizedQuestionExposesTypedParametersAndAcceptsValues(JenkinsRule j) throws Exception {
+        // B24: a question that declares input-style parameters must expose them as a typed array the
+        // modal can render, and accept a {parameters:{name:value}} answer, converting/validating each
+        // value through Jenkins' own ParameterDefinition and recording it.
+        secure(j);
+        submitParams("qp");
+
+        JSONObject detail = json(get(j.createWebClient().login("builder"), j, BASE + "questions/qp"));
+        JSONArray params = detail.getJSONArray("parameters");
+        assertEquals(2, params.size(), "both declared parameters must be exposed");
+        assertEquals("ENV", params.getJSONObject(0).getString("name"));
+        assertEquals("string", params.getJSONObject(0).getString("type"));
+        assertEquals("dev", params.getJSONObject(0).getString("default"));
+        assertEquals("choice", params.getJSONObject(1).getString("type"));
+        assertTrue(params.getJSONObject(1).getJSONArray("choices").contains("a"), "choice options must be exposed");
+
+        assertEquals(
+                200,
+                postJson(
+                        j.createWebClient().login("builder"),
+                        j,
+                        BASE + "questions/qp/answer",
+                        "{\"parameters\":{\"ENV\":\"prod\",\"TIER\":\"a\"}}"));
+        JSONObject after = json(get(j.createWebClient().login("builder"), j, BASE + "questions/qp"));
+        assertEquals("ANSWERED", after.getString("status"));
+        assertEquals("prod", after.getJSONObject("answer").getJSONObject("parameters").getString("ENV"));
+        assertEquals("a", after.getJSONObject("answer").getJSONObject("parameters").getString("TIER"));
+    }
+
+    @Test
+    void parameterizedAnswerRejectsInvalidChoiceValue(JenkinsRule j) throws Exception {
+        // B24: an out-of-range choice value is rejected with 400 via core's own ChoiceParameterDefinition
+        // validation (reused, not re-implemented).
+        secure(j);
+        submitParams("qp2");
+        assertEquals(
+                400,
+                postJson(
+                        j.createWebClient().login("builder"),
+                        j,
+                        BASE + "questions/qp2/answer",
+                        "{\"parameters\":{\"ENV\":\"prod\",\"TIER\":\"nope\"}}"));
+        assertEquals(QuestionStatus.WAITING, QuestionStore.get().get("qp2").getStatus(), "an invalid answer must not settle the question");
+    }
+
+    @Test
+    void bridgedParameterizedInputExposesForwardUrl(JenkinsRule j) throws Exception {
+        secure(j);
+        // A real build must exist so the server can resolve the native input page URL (B27).
+        j.buildAndAssertSuccess(j.jenkins.getItemByFullName(JOB, FreeStyleProject.class));
+
+        // A bridged native input WITH parameters is mirrored with no choices and no free text — the
+        // modal cannot answer it, so questionJson must hand the client the build's input page URL.
+        QuestionStore.get()
+                .submit(new Question(
+                        "qparam", "Need params", null, false, 0L, "params needed", null, JOB, 1, "tester",
+                        System.currentTimeMillis(), true));
+        JSONObject qParam = json(get(j.createWebClient().login("builder"), j, BASE + "questions/qparam"));
+        assertTrue(qParam.getJSONArray("choices").isEmpty(), "a parameterized bridged input has no choices");
+        assertTrue(qParam.has("forwardUrl"), "the modal needs a forward URL to the input page: " + qParam);
+        assertTrue(qParam.getString("forwardUrl").endsWith("/input/"), qParam.getString("forwardUrl"));
+
+        // A bridged input that CAN be answered in-modal (a proceed choice) must NOT get a forward URL.
+        QuestionStore.get()
+                .submit(new Question(
+                        "qproceed", "Proceed?", List.of(new Choice("__proceed__", "Approve / Proceed")), false, 0L,
+                        null, null, JOB, 1, "tester", System.currentTimeMillis(), true));
+        JSONObject qProceed = json(get(j.createWebClient().login("builder"), j, BASE + "questions/qproceed"));
+        assertFalse(qProceed.has("forwardUrl"), "an answerable bridged input needs no forward URL");
+    }
+
     // ---- helpers ----
 
     private static void secure(JenkinsRule j) throws Exception {
@@ -204,6 +306,17 @@ class RestApiTest {
                 .submit(new Question(
                         id, "Approve?", List.of(new Choice("yes", "Yes")), false, 0L, null, null, JOB, 1, startedBy,
                         System.currentTimeMillis(), false));
+    }
+
+    /** Seed a WAITING question that declares native input-style parameters (a string + a choice). B24. */
+    private static void submitParams(String id) {
+        List<ParameterDefinition> params = List.of(
+                new StringParameterDefinition("ENV", "dev", "target environment"),
+                new ChoiceParameterDefinition("TIER", new String[] {"a", "b"}, "tier"));
+        QuestionStore.get()
+                .submit(new Question(
+                        id, "Provide values", null, false, 0L, null, null, JOB, 1, "tester",
+                        System.currentTimeMillis(), false, params));
     }
 
     private static WebResponse get(JenkinsRule.WebClient wc, JenkinsRule j, String path) throws Exception {

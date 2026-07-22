@@ -38,6 +38,9 @@ class JcascRoundTripTest {
         assertEquals(30, cfg.getPolling().getIntervalSeconds());
         assertEquals(5, cfg.getSla().getDefaultMinutes());
         assertEquals(14, cfg.getRetentionDays());
+        // B18: the authorization switches moved from Appearance to System (unclassified.interactiveInput).
+        assertTrue(cfg.isUserScopedNotifications(), "userScopedNotifications enabled in YAML (System)");
+        assertTrue(cfg.isLockToBuildStarter(), "lockToBuildStarter enabled in YAML (System)");
     }
 
     @Test
@@ -49,8 +52,7 @@ class JcascRoundTripTest {
         assertTrue(a.isNotificationCentre(), "notificationCentre enabled in YAML");
         assertTrue(a.isPerProjectCentre());
         assertFalse(a.isJobPageBox(), "jobPageBox disabled in YAML");
-        assertTrue(a.isUserScopedNotifications(), "userScopedNotifications enabled in YAML");
-        assertTrue(a.isLockToBuildStarter(), "lockToBuildStarter enabled in YAML");
+        assertFalse(a.isTabNotificationBadge(), "tabNotificationBadge disabled in YAML");
         assertEquals("hand-left", a.getIcon());
     }
 
@@ -62,6 +64,9 @@ class JcascRoundTripTest {
         assertTrue(exported.contains("interactiveInput"), () -> "export missing symbol:\n" + exported);
         assertTrue(exported.contains("inputStepBridge: true"), () -> "export missing bridge flag:\n" + exported);
         assertTrue(exported.contains("intervalSeconds: 30"), () -> "export missing polling:\n" + exported);
+        assertTrue(
+                exported.contains("lockToBuildStarter: true"),
+                () -> "export missing moved authorization flag (should be under interactiveInput):\n" + exported);
         assertTrue(
                 exported.contains("interactiveInputAppearance"),
                 () -> "export missing appearance block:\n" + exported);

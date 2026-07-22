@@ -29,7 +29,7 @@ All notable changes to this project are documented here. The format follows
   recipients/webhook). Preferences are **persisted only**; delivery ships in a future release.
 - **Appearance configuration** — new `InteractiveInputAppearanceConfig` (`GlobalConfiguration` in the
   `AppearanceCategory`) surfaces under **Manage Jenkins → Appearance → Interactive Input**, and as code
-  under `appearance.interactiveInputAppearance`. It holds three independent on/off switches and an icon
+  under `appearance.interactiveInputAppearance`. It holds four independent on/off switches and an icon
   chooser:
   - `notificationCentre` (default **off**) — the global header bell, now **context-scoped**: the
     dashboard lists every answerable question; inside a pipeline (job/build page) it narrows to that
@@ -38,8 +38,14 @@ All notable changes to this project are documented here. The format follows
   - `perProjectCentre` (default **on**) — gates the per-project surfaces (migrated here from `features`).
   - `jobPageBox` (default **on**) — independently toggles the large inline box on the job page, so the
     badge + sidebar can be kept without the box.
-  - `icon` (default `chatbubble-ellipses`) — the notification icon used across the bell, badge and
-    sidebar, chosen from eight meaning-matched Ionicons (`ionicons-api`).
+  - `tabNotificationBadge` (default **on**) — mirrors the viewer's pending count in the browser tab.
+    When the favicon is **same-origin** (a canvas can read it) it paints a red dot on top of it and
+    leaves the title alone; when the favicon is **cross-origin or missing** (a canvas may not read its
+    pixels — e.g. a Simple Theme plugin favicon on another host) it falls back to a red-circle glyph
+    (U+1F534) + `(N)` prefix on the tab **title** and leaves the favicon exactly as the theme set it.
+    It never replaces the site favicon.
+  - `icon` (default `megaphone`) — the notification icon used across the bell, badge and
+    sidebar, chosen from seven meaning-matched Ionicons (`ionicons-api`).
 - **Attention pulse** — the build-history "awaiting input" badge and the job-page box title blink
   slowly in red (`@keyframes ii-attn-pulse`), with a `prefers-reduced-motion` fallback.
 - **Functional configuration UI** — the feature flags (including the opt-in `inputStepBridge`) are now
@@ -47,8 +53,10 @@ All notable changes to this project are documented here. The format follows
   `config.jelly` + `Features/config.jelly`), not only via JCasC. `configure()` starts the flags all-off
   before binding (so an unchecked box turns the flag off) and leaves polling / SLA / retention — which
   are not on this form — untouched.
-- **User-scoped notifications & lock** — two more Appearance switches (also as code under
-  `appearance.interactiveInputAppearance`), layered on top of the existing permission checks:
+- **User-scoped notifications & lock** — two **System** (functional) authorization switches on
+  `InteractiveInputGlobalConfig`, as code under `unclassified.interactiveInput` (they govern *who* may
+  see/answer, so they are not look-and-feel — review item B18), layered on top of the existing
+  permission checks:
   - `userScopedNotifications` (default **off**) — when on, every surface (bell, per-project box,
     build-list badge, sidebar) shows a viewer only the questions for **builds they started**, plus
     ownerless builds (trigger/SCM/timer-started, which have no human owner). When off, behaviour is
@@ -75,6 +83,13 @@ All notable changes to this project are documented here. The format follows
   **Appearance** per Jenkins core guidance to separate look-and-feel from functional config. The
   functional `features` block keeps `askInteractiveStep`, `richModal`, `restApi`, `inputStepBridge`,
   `dashboardTile`.
+- **Authorization switches moved from Appearance to System (review item B18).** `userScopedNotifications`
+  and `lockToBuildStarter` govern *who* may see/answer a question, so they are functional config: they
+  now live on `InteractiveInputGlobalConfig` under **Manage Jenkins → System → Interactive Input**, as
+  code under `unclassified.interactiveInput` (previously `appearance.interactiveInputAppearance`). This
+  is a breaking JCasC path change for anyone who set them as code.
+- **Default notification icon is now `megaphone`** (was `chatbubble-ellipses`), conveying
+  "needs attention / announcement" as the out-of-the-box choice.
 - The global bell, when enabled, is anchored into the header controls (with a bottom-right floating
   fallback) so it no longer overlaps the settings gear.
 - The rich modal's **context panel is expanded by default**.
@@ -121,6 +136,21 @@ All notable changes to this project are documented here. The format follows
   badge relied on one of those surfaces to have loaded `bell.css`. Adjunct includes are idempotent, so
   no double-load. This applies to every waiting build, including native `input` builds surfaced by
   `inputStepBridge`.
+- **Inline job-page box now appears live, not only after a browser reload.** `jobMain.jelly` rendered
+  the box's `[data-ii-widget]` mount only when `pendingCount > 0` at server-render time, so a question
+  raised *after* the page loaded had no mount to poll and reveal it (the sidebar/bell updated live via
+  their always-present controllers, but the box did not). The box is now always rendered (gated only on
+  `jobPageBox`), starting hidden with `jenkins-hidden` when nothing is pending; `bell.js`
+  (`mountJobWidget`) reveals/hides its `.ii-jobcard` wrapper as the polled count changes.
+- **Browser-tab pending badge now shows with a cross-origin custom favicon.** A canvas may only read
+  pixels from a **same-origin** image, so a dot cannot be composited onto a theme's cross-origin favicon
+  (verified live: a Simple Theme plugin favicon on `nokia.com` returns `Access-Control-Allow-Origin:
+  *.nokia.com`, which does not match the Jenkins origin, so the `crossOrigin="anonymous"` load fails; the
+  controller cannot proxy it either — it gets HTTP 403). The notifier now chooses its presentation per
+  poll from the active favicon: **same-origin** → a red dot painted on top of the favicon (title left
+  clean); **cross-origin or missing** → a red-circle glyph (U+1F534 emoji) + `(N)` prefix on the tab
+  **title**, with the favicon left exactly as the theme set it. It never replaces the site favicon. Gated
+  by the `tabNotificationBadge` Appearance toggle (on by default).
 
 ### Notes / trade-offs
 - The durable audit record is the build console line; the per-build audit *page* is a live view of the
@@ -140,6 +170,10 @@ All notable changes to this project are documented here. The format follows
 - **Search / discoverability.** Refined the plugin `<description>` for plugin-site search, and documented
   the recommended Marketplace labels as GitHub topics (`ai`, `notification`, `ui`, `devops`) in
   `HOSTING.md` §1.6 — with the rationale and the topics deliberately excluded (`pipeline`, `agent`).
+- **README install section removed; version references updated (review item B23).** Dropped the
+  hand-rolled *Install* section (and its ToC entry) in favour of the plugin's Marketplace page, and
+  updated the baseline references to Jenkins **2.568.1+** / Java **21** (the 2.568 baseline requires
+  Java 21).
 
 ## [0.1.0] - 2026-07-19
 

@@ -3,6 +3,7 @@ package io.jenkins.plugins.interactiveinput.step;
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.Extension;
+import hudson.model.ParameterDefinition;
 import hudson.model.Run;
 import hudson.model.TaskListener;
 import io.jenkins.plugins.interactiveinput.config.InteractiveInputGlobalConfig;
@@ -38,7 +39,18 @@ import org.kohsuke.stapler.DataBoundSetter;
  * }</pre>
  *
  * <p>Return value: the picked choice id ({@code String}); or {@code [text: '...', choice: null]} for
- * free text; a Groovy {@code AbortException} on abort; a {@code TimeoutException} on SLA expiry.
+ * free text; the sentinel {@code "__deny__"} (a human denied but chose to continue) or
+ * {@code "__skip__"} (an automation skipped the input) — both let the pipeline branch and carry on. A
+ * <em>Deny/abort</em> instead aborts the run ({@code Result.ABORTED}, via a
+ * {@code FlowInterruptedException}, like the built-in {@code input} step); a {@code TimeoutException}
+ * is thrown on SLA expiry.
+ *
+ * <p><b>Parameters (B24).</b> To serve as a drop-in for the built-in {@code input} step, the step also
+ * accepts a list of {@link ParameterDefinition}s via {@code parameters}. When present, the human fills
+ * in a typed form (text / boolean / choice / password) instead of picking a choice, and the submitted
+ * values are returned with the <em>same contract as {@code input}</em>: a single parameter returns its
+ * value directly; multiple parameters return a {@code Map} of name&#8594;value. Values are created and
+ * validated through Jenkins' own {@link hudson.model.SimpleParameterDefinition#createValue(String)}.
  */
 public class AskInteractiveStep extends Step implements Serializable {
 
@@ -49,6 +61,13 @@ public class AskInteractiveStep extends Step implements Serializable {
 
     @NonNull
     private List<Choice> choices = new ArrayList<>();
+
+    /**
+     * Native {@link ParameterDefinition}s the human fills in, mirroring the built-in {@code input}
+     * step's {@code parameters} (B24). Empty for a plain choice/free-text question.
+     */
+    @NonNull
+    private List<ParameterDefinition> parameters = new ArrayList<>();
 
     private boolean allowFreeText;
 
@@ -85,6 +104,16 @@ public class AskInteractiveStep extends Step implements Serializable {
     @DataBoundSetter
     public void setChoices(@CheckForNull List<Choice> choices) {
         this.choices = choices == null ? new ArrayList<>() : new ArrayList<>(choices);
+    }
+
+    @NonNull
+    public List<ParameterDefinition> getParameters() {
+        return Collections.unmodifiableList(parameters);
+    }
+
+    @DataBoundSetter
+    public void setParameters(@CheckForNull List<ParameterDefinition> parameters) {
+        this.parameters = parameters == null ? new ArrayList<>() : new ArrayList<>(parameters);
     }
 
     public boolean isAllowFreeText() {

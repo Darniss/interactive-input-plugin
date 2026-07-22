@@ -13,6 +13,13 @@ import org.kohsuke.stapler.StaplerRequest2;
  *
  * <p>Maps to the JCasC path {@code unclassified.interactiveInput}. Every capability is opt-in via
  * {@link Features}; the bell cadence and default SLA live in {@link Polling} and {@link Sla}.
+ *
+ * <p>This class also holds the two <em>authorization</em> switches ({@link #isUserScopedNotifications()
+ * userScopedNotifications}, {@link #isLockToBuildStarter() lockToBuildStarter}). They govern <em>who</em>
+ * may see/answer a question, so they belong under <em>System</em> (functional config) rather than
+ * <em>Appearance</em> (look-and-feel) — review item B18. Both default off and only ever <em>restrict</em>
+ * access on top of the core permission checks in {@link io.jenkins.plugins.interactiveinput.store.QuestionStore}
+ * — they never widen it.
  */
 @Extension
 @Symbol("interactiveInput")
@@ -31,6 +38,9 @@ public class InteractiveInputGlobalConfig extends GlobalConfiguration {
     private Sla sla = new Sla();
 
     private int retentionDays = DEFAULT_RETENTION_DAYS;
+
+    private boolean userScopedNotifications;
+    private boolean lockToBuildStarter;
 
     public InteractiveInputGlobalConfig() {
         load();
@@ -88,13 +98,36 @@ public class InteractiveInputGlobalConfig extends GlobalConfiguration {
         save();
     }
 
+    public boolean isUserScopedNotifications() {
+        return userScopedNotifications;
+    }
+
+    @DataBoundSetter
+    public void setUserScopedNotifications(boolean userScopedNotifications) {
+        this.userScopedNotifications = userScopedNotifications;
+        save();
+    }
+
+    public boolean isLockToBuildStarter() {
+        return lockToBuildStarter;
+    }
+
+    @DataBoundSetter
+    public void setLockToBuildStarter(boolean lockToBuildStarter) {
+        this.lockToBuildStarter = lockToBuildStarter;
+        save();
+    }
+
     @Override
     public boolean configure(StaplerRequest2 req, JSONObject json) throws FormException {
         // Feature flags are booleans and Stapler omits unchecked checkboxes, so start them all-off and
-        // let the submitted form re-enable the checked ones (config.jelly renders every flag). Polling,
-        // SLA and retention are not on this form (JCasC / Script Console only), so leave their current
-        // values untouched rather than resetting them to defaults on every System save.
+        // let the submitted form re-enable the checked ones (config.jelly renders every flag). The two
+        // authorization checkboxes (userScopedNotifications, lockToBuildStarter) are reset the same way.
+        // Polling, SLA and retention are on the form too (B20) and are always submitted, so bindJSON
+        // binds them from the request; their setters clamp to safe bounds.
         this.features = allFeaturesOff();
+        this.userScopedNotifications = false;
+        this.lockToBuildStarter = false;
         req.bindJSON(this, json);
         save();
         return true;
@@ -132,5 +165,17 @@ public class InteractiveInputGlobalConfig extends GlobalConfiguration {
     public static int retentionDaysOrDefault() {
         InteractiveInputGlobalConfig c = get();
         return c != null ? c.getRetentionDays() : DEFAULT_RETENTION_DAYS;
+    }
+
+    /** @return whether notification surfaces are scoped to the build starter. Off by default. */
+    public static boolean userScopedNotificationsEnabled() {
+        InteractiveInputGlobalConfig c = get();
+        return c != null && c.isUserScopedNotifications();
+    }
+
+    /** @return whether only the build starter (or an admin) may answer. Off by default. */
+    public static boolean lockToBuildStarterEnabled() {
+        InteractiveInputGlobalConfig c = get();
+        return c != null && c.isLockToBuildStarter();
     }
 }

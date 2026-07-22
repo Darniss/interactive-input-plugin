@@ -2,6 +2,9 @@ package io.jenkins.plugins.interactiveinput.model;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import edu.umd.cs.findbugs.annotations.NonNull;
+import hudson.Extension;
+import hudson.model.AbstractDescribableImpl;
+import hudson.model.Descriptor;
 import java.io.Serializable;
 import net.sf.json.JSONObject;
 import org.kohsuke.stapler.DataBoundConstructor;
@@ -13,8 +16,12 @@ import org.kohsuke.stapler.DataBoundSetter;
  *
  * <p>Instances are immutable once constructed and are safe to persist via XStream and to serialise
  * across a Jenkins restart.
+ *
+ * <p>It is a {@link hudson.model.Describable} (B17) so the {@code askInteractive} step's
+ * {@code config.jelly} can render the choice list as a repeatable nested form block in the Pipeline
+ * Snippet Generator. The descriptor adds no persisted state, so existing XStream data is unaffected.
  */
-public class Choice implements Serializable {
+public class Choice extends AbstractDescribableImpl<Choice> implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
@@ -82,5 +89,19 @@ public class Choice implements Serializable {
             throw new IllegalArgumentException(field + " must not be blank");
         }
         return value;
+    }
+
+    /**
+     * Descriptor so {@link Choice} is a first-class {@code Describable} for the step's repeatable
+     * choice form (B17). It carries no configuration of its own; the fields are bound directly on the
+     * {@link Choice} instance via its {@code @DataBoundConstructor} / {@code @DataBoundSetter}.
+     */
+    @Extension
+    public static class DescriptorImpl extends Descriptor<Choice> {
+        @NonNull
+        @Override
+        public String getDisplayName() {
+            return "Choice";
+        }
     }
 }

@@ -2,6 +2,7 @@ package io.jenkins.plugins.interactiveinput.model;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import edu.umd.cs.findbugs.annotations.NonNull;
+import hudson.model.ParameterDefinition;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -30,6 +31,14 @@ public class Question implements Serializable {
 
     @NonNull
     private final List<Choice> choices;
+
+    /**
+     * Native {@code input}-style parameter definitions the human fills in (B24); empty for a plain
+     * choice/free-text question. Persisted via XStream (each {@link ParameterDefinition} is
+     * {@link Serializable}); {@code null} in legacy XML is normalised to an empty list on read.
+     */
+    @CheckForNull
+    private List<ParameterDefinition> parameters;
 
     private final boolean allowFreeText;
 
@@ -79,9 +88,31 @@ public class Question implements Serializable {
             @CheckForNull String startedBy,
             long createdTs,
             boolean bridged) {
+        this(
+                id, prompt, choices, allowFreeText, slaMs, contextMd, submitterFilter, jobFullName,
+                buildNumber, startedBy, createdTs, bridged, null);
+    }
+
+    /** Canonical constructor; {@code parameters} carries native {@code input}-style fields (B24). */
+    @SuppressWarnings("checkstyle:ParameterNumber")
+    public Question(
+            @NonNull String id,
+            @NonNull String prompt,
+            @CheckForNull List<Choice> choices,
+            boolean allowFreeText,
+            long slaMs,
+            @CheckForNull String contextMd,
+            @CheckForNull String submitterFilter,
+            @NonNull String jobFullName,
+            int buildNumber,
+            @CheckForNull String startedBy,
+            long createdTs,
+            boolean bridged,
+            @CheckForNull List<ParameterDefinition> parameters) {
         this.id = id;
         this.prompt = prompt;
         this.choices = choices == null ? new ArrayList<>() : new ArrayList<>(choices);
+        this.parameters = parameters == null ? new ArrayList<>() : new ArrayList<>(parameters);
         this.allowFreeText = allowFreeText;
         this.slaMs = Math.max(0L, slaMs);
         this.contextMd = contextMd;
@@ -109,6 +140,17 @@ public class Question implements Serializable {
     @NonNull
     public List<Choice> getChoices() {
         return Collections.unmodifiableList(choices);
+    }
+
+    /** @return an unmodifiable view of the native {@code input}-style parameters (never {@code null}). */
+    @NonNull
+    public List<ParameterDefinition> getParameters() {
+        return Collections.unmodifiableList(parameters == null ? new ArrayList<>() : parameters);
+    }
+
+    /** @return {@code true} if this question is answered by filling in parameters rather than a choice. */
+    public boolean hasParameters() {
+        return parameters != null && !parameters.isEmpty();
     }
 
     public boolean isAllowFreeText() {

@@ -16,7 +16,8 @@
     <st:adjunct includes="io.jenkins.plugins.interactiveinput.bell"/>
     <a href="${rootURL}/${it.run.url}interactive-input/"
        class="ii-badge"
-       title="Awaiting interactive input — click to answer"
+       tooltip="Awaiting interactive input — click to answer"
+       data-tooltip-append-to-parent="true"
        aria-label="Awaiting interactive input — click to answer"
        data-ii-badge="true"
        data-root-url="${rootURL}"

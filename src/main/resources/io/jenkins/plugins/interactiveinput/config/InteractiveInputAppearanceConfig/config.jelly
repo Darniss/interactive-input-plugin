@@ -1,7 +1,7 @@
 <?jelly escape-by-default='true'?>
 <!--
   Renders under Manage Jenkins -> Appearance -> "Interactive Input" (this config's category is
-  AppearanceCategory). Three independent on/off switches plus the icon chooser. Bound back via the
+  AppearanceCategory). Four independent on/off switches plus the icon chooser. Bound back via the
   DataBoundSetters on InteractiveInputAppearanceConfig; unchecked boxes reset to false in configure().
 -->
 <j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form">
@@ -38,24 +38,14 @@
     </f:entry>
 
     <f:entry>
-      <f:checkbox field="userScopedNotifications"
-                  title="Show each user only their own build's notifications"/>
+      <f:checkbox field="tabNotificationBadge"
+                  title="Show a pending-count badge in the browser tab"
+                  default="true"/>
       <f:description>
-        When on, the bell, per-project box, sidebar and build-list badge show a question only to the
-        user who started the owning build. Builds started by SCM, a timer, an upstream job or the
-        system have no human owner, so they stay visible to everyone. Off by default (everyone who may
-        answer sees the question).
-      </f:description>
-    </f:entry>
-
-    <f:entry>
-      <f:checkbox field="lockToBuildStarter"
-                  title="Only the build starter may answer (others can view)"/>
-      <f:description>
-        When on, only the user who started the build (or a Jenkins administrator) can submit an answer;
-        everyone else who can see the question reads it with the controls locked. Builds with no human
-        starter are not locked. This is an extra restriction on top of the usual Job/Build permission
-        and submitter checks — it never grants access. Off by default.
+        When on (and the header bell above is enabled), the number of questions you can answer is
+        mirrored in the browser tab: a "(N)" prefix on the tab title and a small red dot painted on top
+        of the current favicon. It does not replace the site favicon, so a custom favicon (e.g. one set
+        by the Simple Theme plugin) is preserved. On by default.
       </f:description>
     </f:entry>
 

@@ -26,10 +26,10 @@
   // (its next sibling) and the footer #interactive-input-bell are parsed. Querying at script-execution
   // time therefore misses them, which is why the bell was absent inside a job and the sidebar "(N)"
   // count never updated live. Discovering after the DOM is parsed fixes both without touching layout.
-  var bellMount = null;
-  var widgetMounts = [];
-  var auditMounts = [];
-  var taskLinkMounts = [];
+  let bellMount = null;
+  let widgetMounts = [];
+  let auditMounts = [];
+  let taskLinkMounts = [];
   // No early return when there are no mounts: build-history badges ([data-ii-badge]) are injected
   // lazily by the async build-history widget, so they may not exist yet at load. A delegated click
   // handler (wired at the bottom) covers them; the polling mounts are still set up conditionally.
@@ -37,16 +37,16 @@
 
   // ----- shared config (all mounts share the same Jenkins origin) -----
   function attr(node, name, dflt) {
-    var v = node ? node.getAttribute(name) : null;
+    const v = node ? node.getAttribute(name) : null;
     return v == null ? dflt : v;
   }
   // Shared config, (re)computed from the first mount present once the DOM is ready (see discover()).
   // Safe defaults keep the delegated badge handler usable on a badge-only page before discovery runs.
-  var cfgSrc = null;
-  var rootUrl = "";
-  var apiBase = rootUrl + "/interactive-input/api/v1";
-  var richModalDefault = true;
-  var pollSeconds = 15;
+  let cfgSrc = null;
+  let rootUrl = "";
+  let apiBase = rootUrl + "/interactive-input/api/v1";
+  let richModalDefault = true;
+  let pollSeconds = 15;
 
   // When the only surface on the page is a build-history badge (no mount to read config from), adopt
   // the origin from the clicked badge's data-root-url so API calls resolve under any context path.
@@ -54,18 +54,16 @@
     if (cfgSrc) {
       return;
     }
-    var ru = node && node.getAttribute ? node.getAttribute("data-root-url") : null;
+    const ru = node && node.getAttribute ? node.getAttribute("data-root-url") : null;
     if (ru != null) {
       rootUrl = ru.replace(/\/$/, "");
       apiBase = rootUrl + "/interactive-input/api/v1";
     }
   }
 
-  var crumb = null; // {field, value}
-
   // ----- small DOM helpers -----
   function el(tag, opts) {
-    var e = document.createElement(tag);
+    const e = document.createElement(tag);
     opts = opts || {};
     if (opts.cls) e.className = opts.cls;
     if (opts.text != null) e.textContent = opts.text;
@@ -98,42 +96,22 @@
     options.headers["Accept"] = "application/json";
     options.credentials = "same-origin";
     return fetch(url, options).then(function (resp) {
-      var ct = resp.headers.get("content-type") || "";
-      var parse = ct.indexOf("application/json") >= 0 ? resp.json() : resp.text();
+      const ct = resp.headers.get("content-type") || "";
+      const parse = ct.indexOf("application/json") >= 0 ? resp.json() : resp.text();
       return parse.then(function (body) {
         return { ok: resp.ok, status: resp.status, body: body };
       });
     });
   }
 
-  function loadCrumb() {
-    return fetchJson(rootUrl + "/crumbIssuer/api/json")
-      .then(function (r) {
-        if (r.ok && r.body && r.body.crumbRequestField) {
-          crumb = { field: r.body.crumbRequestField, value: r.body.crumb };
-        }
-      })
-      .catch(function () {
-        /* CSRF protection may be disabled; proceed without a crumb. */
-      });
-  }
-
-  // Load the crumb at most once, on demand — so a badge-only page (no eager mount bootstrap) still
-  // has a crumb before it POSTs an answer.
-  var crumbAttempted = false;
-  function ensureCrumb() {
-    if (crumbAttempted) {
-      return Promise.resolve();
-    }
-    crumbAttempted = true;
-    return loadCrumb();
-  }
-
+  // B15: Jenkins publishes a global `crumb` object (from hudson-behavior.js, present on every page)
+  // whose wrap() adds the CSRF request header — so there is no need to fetch /crumbIssuer ourselves.
+  // Accessed via window.crumb so a page/test harness without the core script (or with CSRF disabled)
+  // degrades gracefully instead of throwing on an undefined identifier.
   function postJson(url, payload) {
-    var headers = { "Content-Type": "application/json" };
-    if (crumb) {
-      headers[crumb.field] = crumb.value;
-    }
+    const base = { "Content-Type": "application/json" };
+    const headers =
+      window.crumb && typeof window.crumb.wrap === "function" ? window.crumb.wrap(base) : base;
     return fetchJson(url, { method: "POST", headers: headers, body: JSON.stringify(payload || {}) });
   }
 
@@ -142,12 +120,98 @@
     return q.jobFullName + " #" + q.buildNumber;
   }
 
-  function slaLabel(ms) {
-    if (ms <= 0) return "SLA due";
-    var min = Math.round(ms / 60000);
-    if (min < 60) return "SLA " + min + "m";
-    return "SLA " + Math.round(min / 60) + "h";
+  // ----- live SLA countdown + progress bar (shared by the box rows and the open dialog) -----
+  // The step supports an SLA/timeout (slaMinutes -> Question.expiresAt); the REST payload carries
+  // slaMs / expiresAt / remainingMs. We show a running counter and, in the job box, a progress bar that
+  // "ticks" as time runs out. Values are recomputed locally from the remaining time captured at fetch
+  // (not from the absolute expiresAt) so a server/client clock skew never makes the counter wrong.
+  function fmtCountdown(ms) {
+    const totalSec = Math.max(0, Math.floor(ms / 1000));
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    const two = function (n) {
+      return n < 10 ? "0" + n : String(n);
+    };
+    return h > 0 ? h + ":" + two(m) + ":" + two(s) : m + ":" + two(s);
   }
+
+  function remainingNow(node) {
+    const rem0 = parseInt(node.getAttribute("data-ii-remaining"), 10);
+    const fetched = parseInt(node.getAttribute("data-ii-fetched"), 10);
+    if (isNaN(rem0) || isNaN(fetched)) {
+      return -1;
+    }
+    return Math.max(0, rem0 - (Date.now() - fetched));
+  }
+
+  // Threshold (ms) under which the counter/bar turn red to signal urgency.
+  const SLA_URGENT_MS = 60000;
+
+  function updateCountdownEl(node) {
+    const sla = parseInt(node.getAttribute("data-ii-sla"), 10) || 0;
+    const rem = remainingNow(node);
+    if (rem < 0) {
+      return;
+    }
+    const text = node.querySelector(".ii-countdown-text");
+    if (text) {
+      text.textContent = rem > 0 ? "Time left " + fmtCountdown(rem) : "Time is up";
+    }
+    const bar = node.querySelector(".app-progress-bar");
+    if (bar) {
+      const fill = bar.querySelector("span");
+      if (fill && sla > 0) {
+        fill.style.width = Math.max(0, Math.min(100, (rem / sla) * 100)) + "%";
+      }
+      // core's own modifier draws the bar in --error-color; theme-aware for free.
+      bar.classList.toggle("app-progress-bar--error", rem <= SLA_URGENT_MS);
+    }
+    node.classList.toggle("ii-countdown-urgent", rem <= SLA_URGENT_MS);
+  }
+
+  // Build a live countdown element for a question with an SLA. `withBar` adds the native progress bar
+  // (used in the job box); the bell dropdown and dialog show the counter text only. Returns null when
+  // the question has no SLA.
+  function buildCountdown(q, withBar) {
+    if (!(q.slaMs > 0) || q.remainingMs < 0) {
+      return null;
+    }
+    const wrap = el("span", {
+      cls: "ii-countdown",
+      attrs: {
+        "data-ii-remaining": String(q.remainingMs),
+        "data-ii-sla": String(q.slaMs),
+        "data-ii-fetched": String(Date.now())
+      }
+    });
+    wrap.appendChild(el("span", { cls: "ii-countdown-text" }));
+    if (withBar) {
+      // Replicate core's <t:progressBar> markup (app-progress-bar + an inner span sized by width%) so
+      // the bar is fully theme-aware. The inner span carries core's --animate modifier so it shows the
+      // native moving "ticking" stripes, while the shared ticker keeps its width in sync with the time
+      // left (updated every second — see updateCountdownEl).
+      const bar = el("div", {
+        cls: "app-progress-bar ii-sla-bar",
+        attrs: { role: "progressbar", "aria-label": "Time remaining to answer" }
+      });
+      bar.appendChild(el("span", { cls: "app-progress-bar--animate" }));
+      wrap.appendChild(bar);
+    }
+    updateCountdownEl(wrap);
+    return wrap;
+  }
+
+  function tickCountdowns() {
+    toArray(document.querySelectorAll(".ii-countdown")).forEach(updateCountdownEl);
+  }
+  // One visibility-aware 1s ticker drives every live countdown/bar on the page (box rows + open dialog)
+  // with no extra network traffic.
+  setInterval(function () {
+    if (!document.hidden) {
+      tickCountdowns();
+    }
+  }, 1000);
 
   function fmtTime(ts) {
     if (!ts) return "";
@@ -160,7 +224,7 @@
 
   function choiceLabelOf(q, choiceId) {
     if (q.choices) {
-      for (var i = 0; i < q.choices.length; i++) {
+      for (let i = 0; i < q.choices.length; i++) {
         if (q.choices[i].id === choiceId) return q.choices[i].label;
       }
     }
@@ -168,12 +232,17 @@
   }
 
   function outcomeText(q) {
-    var a = q.answer;
+    const a = q.answer;
     if (q.status === "ANSWERED" && a) {
-      var who = a.answeredBy || "unknown";
-      if (a.choiceId === "__deny__") return "Denied by " + who + fmtTime(a.answeredTs);
+      const who = a.answeredBy || "unknown";
+      if (a.choiceId === "__deny__") return "Denied by " + who + " — continued" + fmtTime(a.answeredTs);
+      if (a.choiceId === "__skip__") return "Skipped by " + who + fmtTime(a.answeredTs);
       if (a.choiceId) return "Answered by " + who + ": " + choiceLabelOf(q, a.choiceId) + fmtTime(a.answeredTs);
       if (a.freeText) return "Answered by " + who + ": " + a.freeText + fmtTime(a.answeredTs);
+      if (a.parameters) {
+        const n = Object.keys(a.parameters).length;
+        return "Answered by " + who + ": " + n + (n === 1 ? " parameter" : " parameters") + fmtTime(a.answeredTs);
+      }
       return "Answered by " + who + fmtTime(a.answeredTs);
     }
     if (q.status === "ABORTED") {
@@ -185,7 +254,7 @@
   }
 
   function shortOutcome(q) {
-    var t = outcomeText(q);
+    const t = outcomeText(q);
     return t.length > 80 ? t.slice(0, 80) + "…" : t;
   }
 
@@ -194,24 +263,27 @@
   }
 
   // ----- shared list rows -----
-  function questionListItem(q, onClick) {
-    var link = el("button", { cls: "ii-item", attrs: { type: "button", role: "menuitem" } });
+  function questionListItem(q, onClick, opts) {
+    opts = opts || {};
+    const link = el("button", { cls: "ii-item", attrs: { type: "button", role: "menuitem" } });
     link.appendChild(el("span", { cls: "ii-item-prompt", text: q.prompt }));
     link.appendChild(el("span", { cls: "ii-item-ref", text: refLabel(q) }));
     if (q.startedBy) {
       link.appendChild(el("span", { cls: "ii-item-by", text: "started by " + q.startedBy }));
     }
-    if (q.remainingMs >= 0) {
-      link.appendChild(el("span", { cls: "ii-item-sla", text: slaLabel(q.remainingMs) }));
+    // Live SLA counter; the job box additionally shows the ticking progress bar (opts.withBar).
+    const countdown = buildCountdown(q, !!opts.withBar);
+    if (countdown) {
+      link.appendChild(countdown);
     }
     link.addEventListener("click", onClick);
     return link;
   }
 
   function auditRow(q, onClick) {
-    var link = el("button", { cls: "ii-item", attrs: { type: "button" } });
+    const link = el("button", { cls: "ii-item", attrs: { type: "button" } });
     link.appendChild(el("span", { cls: "ii-item-prompt", text: q.prompt }));
-    var meta = el("span", { cls: "ii-item-ref" });
+    const meta = el("span", { cls: "ii-item-ref" });
     meta.appendChild(statusPill(q.status));
     if (q.startedBy) {
       meta.appendChild(el("span", { cls: "ii-item-by", text: " started by " + q.startedBy }));
@@ -223,37 +295,35 @@
   }
 
   // ================================ shared modal ================================
-  var activeModal = null;
-  var lastFocused = null;
+  let activeModal = null;
+  let lastFocused = null;
 
-  function closeModal() {
-    if (activeModal) {
-      document.removeEventListener("keydown", modalKeydown, true);
-      if (activeModal.parentNode) activeModal.parentNode.removeChild(activeModal);
-      activeModal = null;
-      if (lastFocused && lastFocused.focus) lastFocused.focus();
+  function teardownDialog(dialog) {
+    if (dialog && dialog.parentNode) {
+      dialog.parentNode.removeChild(dialog);
+    }
+    if (lastFocused && lastFocused.focus) {
+      lastFocused.focus();
     }
   }
 
-  function modalKeydown(e) {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      closeModal();
-    } else if (e.key === "Tab" && activeModal) {
-      var focusable = activeModal.querySelectorAll(
-        'button, [href], input, textarea, select, [tabindex]:not([tabindex="-1"])'
-      );
-      if (!focusable.length) return;
-      var first = focusable[0];
-      var last = focusable[focusable.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
+  // Close the shared dialog. Native <dialog>.close() drops the modal/top-layer + backdrop; we then
+  // remove the element and restore focus. Escape (cancel) and backdrop-click are routed here too (see
+  // openDialog) for a single teardown path. Focus-trapping is provided natively by showModal().
+  function closeModal() {
+    if (!activeModal) {
+      return;
     }
+    const dialog = activeModal;
+    activeModal = null;
+    try {
+      if (dialog.open && typeof dialog.close === "function") {
+        dialog.close();
+      }
+    } catch (e) {
+      /* not an open native dialog */
+    }
+    teardownDialog(dialog);
   }
 
   function navigateToInput(q) {
@@ -268,8 +338,8 @@
    */
   function openQuestion(q, opts) {
     opts = opts || {};
-    var readOnly = !!opts.readOnly;
-    var richModal = opts.richModal != null ? opts.richModal : richModalDefault;
+    const readOnly = !!opts.readOnly;
+    const richModal = opts.richModal != null ? opts.richModal : richModalDefault;
     if (!readOnly && !richModal) {
       navigateToInput(q);
       return;
@@ -287,15 +357,40 @@
       });
   }
 
+  // Build the shared dialog as core's native <dialog class="jenkins-dialog"> (B8, Jenkins >= 2.560):
+  // the shell, backdrop, elevation, focus-trap, Escape handling and light/dark theming come from core.
+  // We render the rich body (context, choices, free-text preview, series pager) into
+  // .jenkins-dialog__contents ourselves; the buttons use the native design-library button classes.
   function buildModalShell(q, readOnly) {
-    var titleId = "ii-modal-title-" + q.id;
-    var modal = el("div", {
-      cls: "ii-modal",
-      attrs: { role: "dialog", "aria-modal": "true", "aria-labelledby": titleId }
+    const titleId = "ii-modal-title-" + q.id;
+    const dialog = el("dialog", {
+      cls: "jenkins-dialog ii-dialog",
+      attrs: { "aria-labelledby": titleId }
     });
-    modal.appendChild(el("h2", { cls: "ii-modal-title", text: q.prompt, attrs: { id: titleId } }));
 
-    var sub = el("p", { cls: "ii-modal-sub" });
+    const titleBar = el("div", { cls: "jenkins-dialog__title" });
+    titleBar.appendChild(el("span", { text: q.prompt, attrs: { id: titleId } }));
+    // Native close button = jenkins-button (theme-aware background/hover/colour) + __title__button (the
+    // round 2rem icon-button shape core defines) + __title__close-button (margin-left:auto, trailing
+    // edge). Using only __title__close-button dropped the shape and native hover, so it looked off.
+    const closeBtn = el("button", {
+      cls: "jenkins-button jenkins-dialog__title__button jenkins-dialog__title__close-button",
+      attrs: { type: "button", "aria-label": "Close" }
+    });
+    closeBtn.innerHTML =
+      '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">' +
+      '<path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" ' +
+      'stroke-linecap="round" fill="none"/></svg>';
+    closeBtn.addEventListener("click", closeModal);
+    titleBar.appendChild(closeBtn);
+    dialog.appendChild(titleBar);
+
+    // Body container: core gives it the 1.25rem side padding + scroll. The subtitle is the first row
+    // INSIDE it — core's .jenkins-dialog__subtitle has padding:0, so as a direct child of the padless
+    // <dialog> it sat flush against the edge; inside __contents it aligns with the title and body.
+    const contents = el("div", { cls: "jenkins-dialog__contents" });
+
+    const sub = el("div", { cls: "jenkins-dialog__subtitle" });
     sub.appendChild(el("span", { text: refLabel(q) }));
     if (q.startedBy) {
       sub.appendChild(el("span", { cls: "ii-sub-by", text: " · started by " + q.startedBy }));
@@ -303,63 +398,207 @@
     if (readOnly && q.status) {
       sub.appendChild(statusPill(q.status));
     }
-    modal.appendChild(sub);
+    contents.appendChild(sub);
+
+    // Live SLA counter in the dialog while the question is still waiting (item 3).
+    if (!q.status || q.status === "WAITING") {
+      const countdown = buildCountdown(q, false);
+      if (countdown) {
+        countdown.classList.add("ii-countdown-dialog");
+        contents.appendChild(countdown);
+      }
+    }
 
     if (q.contextHtml) {
       // Expanded by default so reviewers see the context without an extra click.
-      var details = el("details", { cls: "ii-context", attrs: { open: "open" } });
+      const details = el("details", { cls: "ii-context", attrs: { open: "open" } });
       details.appendChild(el("summary", { text: "Context" }));
       details.appendChild(el("div", { cls: "ii-context-body", html: q.contextHtml }));
-      modal.appendChild(details);
+      contents.appendChild(details);
     }
-    return modal;
+    dialog.appendChild(contents);
+    return dialog;
+  }
+
+  // The scrollable body container that renderForm / renderAudit / the series pager append into.
+  function dialogBody(dialog) {
+    return dialog.querySelector(".jenkins-dialog__contents") || dialog;
   }
 
   function renderAudit(modal, q) {
+    const body = dialogBody(modal);
     if (q.choices && q.choices.length) {
-      var chosen = q.answer && q.answer.choiceId;
-      var ul = el("ul", { cls: "ii-audit-choices" });
+      const chosen = q.answer && q.answer.choiceId;
+      const ul = el("ul", { cls: "ii-audit-choices" });
       q.choices.forEach(function (c) {
-        var li = el("li", { cls: "ii-audit-choice" + (c.id === chosen ? " ii-chosen" : "") });
+        const li = el("li", { cls: "ii-audit-choice" + (c.id === chosen ? " ii-chosen" : "") });
         li.appendChild(el("span", { cls: "ii-choice-label", text: c.label + (c.id === chosen ? "  ✓" : "") }));
         if (c.why) li.appendChild(el("span", { cls: "ii-choice-why", text: c.why }));
         ul.appendChild(li);
       });
-      modal.appendChild(ul);
+      body.appendChild(ul);
     }
-    var outcome = el("div", { cls: "ii-audit-outcome" });
+    // B24: for a parameterized answer, list the submitted name/value pairs (secrets already redacted
+    // server-side). Values arrive as strings/booleans, so String() is safe.
+    if (q.answer && q.answer.parameters && typeof q.answer.parameters === "object") {
+      const pul = el("ul", { cls: "ii-audit-params" });
+      Object.keys(q.answer.parameters).forEach(function (name) {
+        const li = el("li", { cls: "ii-audit-param" });
+        li.appendChild(el("span", { cls: "ii-choice-label", text: name }));
+        li.appendChild(el("span", { cls: "ii-choice-why", text: String(q.answer.parameters[name]) }));
+        pul.appendChild(li);
+      });
+      body.appendChild(pul);
+    }
+    const outcome = el("div", { cls: "ii-audit-outcome" });
     outcome.appendChild(el("div", { cls: "ii-audit-outcome-title", text: "Outcome" }));
     outcome.appendChild(el("div", { text: outcomeText(q) }));
-    modal.appendChild(outcome);
+    body.appendChild(outcome);
 
-    var actions = el("div", { cls: "ii-actions" });
-    var closeBtn = el("button", { cls: "ii-btn", text: "Close", attrs: { type: "button" } });
+    const actions = el("div", { cls: "ii-actions jenkins-dialog__buttons" });
+    const closeBtn = el("button", { cls: "jenkins-button", text: "Close", attrs: { type: "button" } });
     closeBtn.addEventListener("click", closeModal);
     actions.appendChild(closeBtn);
-    modal.appendChild(actions);
+    body.appendChild(actions);
+  }
+
+  // B24: render the native input-style parameter controls (string / text / boolean / choice /
+  // password) and return a reader that collects { name: value } for the answer POST. A type the
+  // dialog cannot render is surfaced read-only and flagged via `unsupported` so the caller can disable
+  // submit rather than silently sending a wrong value. All labels/values go in via textContent.
+  function renderParameters(container, params, initial) {
+    const fieldset = el("fieldset", { cls: "ii-params" });
+    fieldset.appendChild(el("legend", { text: "Provide the requested values" }));
+    const readers = [];
+    let unsupported = false;
+    params.forEach(function (p, idx) {
+      const row = el("div", { cls: "ii-param ii-param-" + p.type });
+      const id = "ii-param-" + idx;
+      const seed = initial && initial[p.name] != null ? initial[p.name] : p.default;
+
+      // Boolean uses the native design-library checkbox: the real <input> is visually hidden and the
+      // control is drawn by core CSS on the adjacent <label> (see core lib/form/checkbox.jelly). The
+      // label — linked via `for` so a click toggles it without core JS — carries the parameter name, so
+      // booleans skip the separate top label the other types get.
+      if (p.type === "boolean") {
+        const wrap = el("span", { cls: "jenkins-checkbox" });
+        const control = el("input", { attrs: { type: "checkbox", id: id } });
+        if (seed === true || seed === "true") {
+          control.checked = true;
+        }
+        wrap.appendChild(control);
+        wrap.appendChild(el("label", { cls: "attach-previous", text: p.name, attrs: { for: id } }));
+        row.appendChild(wrap);
+        if (p.description) {
+          row.appendChild(el("div", { cls: "jenkins-checkbox__description", text: p.description }));
+        }
+        readers.push(function () {
+          return [p.name, control.checked];
+        });
+        fieldset.appendChild(row);
+        return;
+      }
+
+      row.appendChild(el("label", { cls: "ii-param-label", text: p.name, attrs: { for: id } }));
+      if (p.description) {
+        row.appendChild(el("span", { cls: "ii-param-desc", text: p.description }));
+      }
+      if (p.type === "choice") {
+        // Native design-library select: <div class="jenkins-select"><select class="jenkins-select__input">.
+        const selectWrap = el("div", { cls: "jenkins-select" });
+        const control = el("select", { cls: "jenkins-select__input", attrs: { id: id } });
+        (p.choices || []).forEach(function (c) {
+          const opt = el("option", { text: c, attrs: { value: c } });
+          if (seed != null && String(seed) === String(c)) {
+            opt.selected = true;
+          }
+          control.appendChild(opt);
+        });
+        selectWrap.appendChild(control);
+        row.appendChild(selectWrap);
+        readers.push(function () {
+          return [p.name, control.value];
+        });
+      } else if (p.type === "text") {
+        const control = el("textarea", { cls: "jenkins-input", attrs: { id: id, rows: "3" } });
+        if (seed != null) {
+          control.value = String(seed);
+        }
+        row.appendChild(control);
+        readers.push(function () {
+          return [p.name, control.value];
+        });
+      } else if (p.type === "password" || p.type === "string") {
+        const control = el("input", {
+          cls: "jenkins-input",
+          attrs: { type: p.type === "password" ? "password" : "text", id: id }
+        });
+        if (p.type === "password") {
+          control.setAttribute("autocomplete", "new-password");
+        }
+        if (seed != null) {
+          control.value = String(seed);
+        }
+        row.appendChild(control);
+        readers.push(function () {
+          return [p.name, control.value];
+        });
+      } else {
+        unsupported = true;
+        row.appendChild(
+          el("div", {
+            cls: "ii-param-unsupported",
+            text: "This parameter type isn't supported in the dialog yet — open the build's input page."
+          })
+        );
+      }
+      fieldset.appendChild(row);
+    });
+    container.appendChild(fieldset);
+    return {
+      unsupported: unsupported,
+      read: function () {
+        const out = {};
+        readers.forEach(function (r) {
+          const kv = r();
+          out[kv[0]] = kv[1];
+        });
+        return out;
+      }
+    };
   }
 
   function renderForm(modal, q, opts) {
-    var onDone = opts.onDone || noop;
-    var form = el("form", { cls: "ii-form" });
-    var selectedChoice = { id: null };
+    const onDone = opts.onDone || noop;
+    const body = dialogBody(modal);
+    const form = el("form", { cls: "ii-form" });
+    const selectedChoice = { id: null };
+
+    // B24: when the question declares input-style parameters, the human fills those in instead of
+    // picking a choice / typing free text; the submitted values are returned to the pipeline.
+    const params = Array.isArray(q.parameters) ? q.parameters : [];
+    const paramsMode = params.length > 0;
+    let paramForm = null;
+    if (paramsMode) {
+      paramForm = renderParameters(form, params, opts.initial ? opts.initial.parameters : null);
+    }
 
     // In a series the caller passes opts.initial to restore a half-finished answer (draft) when the
     // user pages back to this question; otherwise the first choice is pre-selected as before.
-    var initialChoiceId = opts.initial ? opts.initial.choiceId : null;
-    var hasInitialChoice = false;
+    const initialChoiceId = opts.initial ? opts.initial.choiceId : null;
+    let hasInitialChoice = false;
     if (initialChoiceId && q.choices) {
       hasInitialChoice = q.choices.some(function (c) {
         return c.id === initialChoiceId;
       });
     }
 
-    if (q.choices && q.choices.length) {
-      var fieldset = el("fieldset", { cls: "ii-choices" });
+    if (!paramsMode && q.choices && q.choices.length) {
+      const fieldset = el("fieldset", { cls: "ii-choices" });
       fieldset.appendChild(el("legend", { text: "Choose an option" }));
       q.choices.forEach(function (c, idx) {
-        var row = el("label", { cls: "ii-choice" });
-        var radio = el("input", { attrs: { type: "radio", name: "ii-choice", value: c.id } });
+        const row = el("label", { cls: "ii-choice" });
+        const radio = el("input", { attrs: { type: "radio", name: "ii-choice", value: c.id } });
         if (hasInitialChoice ? c.id === initialChoiceId : idx === 0) {
           radio.checked = true;
           selectedChoice.id = c.id;
@@ -367,7 +606,7 @@
         radio.addEventListener("change", function () {
           selectedChoice.id = c.id;
         });
-        var textWrap = el("span", { cls: "ii-choice-text" });
+        const textWrap = el("span", { cls: "ii-choice-text" });
         textWrap.appendChild(el("span", { cls: "ii-choice-label", text: c.label }));
         if (c.why) {
           textWrap.appendChild(el("span", { cls: "ii-choice-why", text: c.why }));
@@ -379,10 +618,10 @@
       form.appendChild(fieldset);
     }
 
-    var freeTextArea = null;
-    if (q.allowFreeText) {
-      var ftWrap = el("div", { cls: "ii-freetext" });
-      var ftLabel = el("label", {
+    let freeTextArea = null;
+    if (!paramsMode && q.allowFreeText) {
+      const ftWrap = el("div", { cls: "ii-freetext" });
+      const ftLabel = el("label", {
         text: "Or type an answer (markdown supported)",
         attrs: { for: "ii-ft-" + q.id }
       });
@@ -393,12 +632,12 @@
       if (opts.initial && opts.initial.freeText) {
         freeTextArea.value = opts.initial.freeText;
       }
-      var preview = el("div", { cls: "ii-preview", attrs: { "aria-live": "polite" } });
-      var previewTimer = null;
+      const preview = el("div", { cls: "ii-preview", attrs: { "aria-live": "polite" } });
+      let previewTimer = null;
       freeTextArea.addEventListener("input", function () {
         if (previewTimer) clearTimeout(previewTimer);
         previewTimer = setTimeout(function () {
-          var val = freeTextArea.value;
+          const val = freeTextArea.value;
           if (!val) {
             preview.innerHTML = "";
             return;
@@ -417,37 +656,105 @@
       form.appendChild(ftWrap);
     }
 
-    var errBox = el("div", { cls: "ii-error", attrs: { role: "alert" } });
+    const errBox = el("div", { cls: "ii-error", attrs: { role: "alert" } });
     form.appendChild(errBox);
 
     // Locked (Point 3): when the server reports the viewer may not answer this question (lock-to-
     // build-starter is on and they are not the owner), they can still read it but the controls are
     // disabled with an explanation. `canAnswer` is only present when the server computes it, so this
     // is a no-op for older payloads.
-    var locked = q.canAnswer === false;
+    const locked = q.canAnswer === false;
 
-    var actions = el("div", { cls: "ii-actions" });
-    var answerBtn = el("button", { cls: "ii-btn ii-btn-primary", text: "Answer", attrs: { type: "submit" } });
-    var denyBtn = el("button", { cls: "ii-btn ii-btn-danger", text: "Deny", attrs: { type: "button" } });
-    var cancelBtn = el("button", { cls: "ii-btn", text: locked ? "Close" : "Cancel", attrs: { type: "button" } });
+    const actions = el("div", { cls: "ii-actions jenkins-dialog__buttons" });
+    const answerBtn = el("button", {
+      cls: "jenkins-button jenkins-button--primary",
+      text: paramsMode ? "Submit" : "Answer",
+      attrs: { type: "submit" }
+    });
+    // A rejection offers two explicit outcomes (defaulting to abort) so a human — or an AI via REST —
+    // has a choice:
+    //   * Deny (destructive) -> POST /abort -> the run is ABORTED, like the built-in input step;
+    //   * Skip  (neutral)     -> answer with the "__skip__" sentinel -> the run RESUMES, so the pipeline
+    //     can branch on it. Renamed from "Continue": "Skip" matches the returned "__skip__" marker and the
+    //     "Skipped by …" audit line (the legacy "__deny__" marker still resolves identically for REST
+    //     clients). "Skip" is meaningless for a bridged native input (proceed/abort only), so it is hidden
+    //     there and when the answer is a set of parameter values (B24).
+    const denyBtn = el("button", {
+      cls: "jenkins-button jenkins-!-destructive-color",
+      text: "Deny",
+      attrs: { type: "button", tooltip: "Reject and abort the build" }
+    });
+    const skipBtn = el("button", {
+      cls: "jenkins-button",
+      text: "Skip",
+      attrs: { type: "button", tooltip: "Skip without approving — the pipeline continues" }
+    });
+    const showSkip = q.bridged !== true && !paramsMode;
+    // B27: a bridged native input that declares parameters is mirrored with no choices and no free
+    // text, so it cannot be answered here. The server provides its build's input page URL as
+    // forwardUrl; offer a link to that page (plus Deny, which aborts the native input) instead of an
+    // Answer button that could only dead-end on "Pick a choice or type an answer".
+    const canAnswerInModal = paramsMode || (q.choices && q.choices.length) || q.allowFreeText;
+    const forwardUrl = typeof q.forwardUrl === "string" ? q.forwardUrl : "";
+    const forwardMode = !canAnswerInModal && forwardUrl !== "";
+    const forwardBtn = el("a", {
+      cls: "jenkins-button jenkins-button--primary",
+      text: "Open the build's input page",
+      attrs: { href: forwardUrl, tooltip: "This input needs parameters — open the build to answer it" }
+    });
+    const cancelBtn = el("button", {
+      cls: "jenkins-button",
+      text: locked ? "Close" : "Cancel",
+      attrs: { type: "button" }
+    });
     if (locked) {
-      var owner = q.startedBy ? " Only " + q.startedBy + " (the build starter) can answer it." : "";
+      const owner = q.startedBy ? " Only " + q.startedBy + " (the build starter) can answer it." : "";
       errBox.textContent = "Locked." + owner;
-      answerBtn.disabled = true;
-      denyBtn.disabled = true;
-      answerBtn.setAttribute("aria-disabled", "true");
-      denyBtn.setAttribute("aria-disabled", "true");
+      [answerBtn, denyBtn, skipBtn].forEach(function (b) {
+        b.disabled = true;
+        b.setAttribute("aria-disabled", "true");
+      });
+    } else if (forwardMode) {
+      actions.appendChild(forwardBtn);
+      actions.appendChild(denyBtn); // Deny still aborts the underlying native input
     } else {
       actions.appendChild(answerBtn);
+      if (showSkip) {
+        actions.appendChild(skipBtn);
+      }
       actions.appendChild(denyBtn);
     }
     actions.appendChild(cancelBtn);
+    // Item 4: spell out the consequence of a rejection so "Deny" is not mistaken for a soft dismiss — it
+    // aborts the run (Result.ABORTED), mirroring the built-in input step. Shown whenever Deny is offered.
+    if (!locked) {
+      // Item 1: wrap the consequence note in parentheses, e.g.
+      //   "(Deny will abort the build. Skip resumes the pipeline without approving.)"
+      //   "(Deny will abort the build.)"
+      const denyNote = el("div", { cls: "ii-deny-note", attrs: { role: "note" } });
+      denyNote.appendChild(el("span", { text: "(" }));
+      denyNote.appendChild(el("span", { cls: "ii-deny-note-strong", text: "Deny will abort the build." }));
+      if (showSkip && !forwardMode) {
+        denyNote.appendChild(el("span", { text: " Skip resumes the pipeline without approving." }));
+      }
+      denyNote.appendChild(el("span", { text: ")" }));
+      form.appendChild(denyNote);
+    }
     form.appendChild(actions);
-    modal.appendChild(form);
+    body.appendChild(form);
+
+    // B24: a parameter type the dialog can't render (e.g. file/credentials) can't be answered here yet.
+    if (!locked && paramsMode && paramForm.unsupported) {
+      answerBtn.disabled = true;
+      answerBtn.setAttribute("aria-disabled", "true");
+      errBox.textContent =
+        "Some parameter types aren't supported in the dialog yet — open the build's input page to answer.";
+    }
 
     function busy(on) {
       answerBtn.disabled = on;
       denyBtn.disabled = on;
+      skipBtn.disabled = on;
     }
     function fail(msg) {
       errBox.textContent = msg;
@@ -474,13 +781,39 @@
           fail("Network error submitting the answer.");
         });
     }
+    // B26 (Deny): POST /abort. The run is aborting, so always close — even inside a series — and let the
+    // other surfaces refresh off the ii:answered event; we deliberately do not advance the series pager.
+    function abort() {
+      busy(true);
+      errBox.textContent = "";
+      postJson(apiBase + "/questions/" + encodeURIComponent(q.id) + "/abort", {})
+        .then(function (r) {
+          if (r.ok) {
+            closeModal();
+            announceAnswered(q);
+          } else {
+            fail((r.body && r.body.message) || "Failed to abort (HTTP " + r.status + ")");
+          }
+        })
+        .catch(function () {
+          fail("Network error aborting the input.");
+        });
+    }
 
     form.addEventListener("submit", function (e) {
       e.preventDefault();
-      if (locked) {
+      if (locked || forwardMode) {
+        return; // forwardMode: the only action is the "Open the build's input page" link (B27)
+      }
+      if (paramsMode) {
+        if (paramForm.unsupported) {
+          fail("Some parameter types aren't supported in the dialog yet — open the build's input page.");
+          return;
+        }
+        submit({ parameters: paramForm.read() });
         return;
       }
-      var freeText = freeTextArea ? freeTextArea.value.trim() : "";
+      const freeText = freeTextArea ? freeTextArea.value.trim() : "";
       if (freeText) {
         submit({ freeText: freeText });
       } else if (selectedChoice.id) {
@@ -493,57 +826,80 @@
       if (locked) {
         return;
       }
-      submit({ choiceId: "__deny__" });
+      abort();
+    });
+    skipBtn.addEventListener("click", function () {
+      if (locked) {
+        return;
+      }
+      submit({ choiceId: "__skip__" });
     });
     cancelBtn.addEventListener("click", closeModal);
   }
 
-  // Open a fresh overlay hosting `modal`. Wires overlay-click/Escape close and initial focus.
-  function openOverlay(modal) {
+  // Open a fresh native dialog. showModal() provides the modal state, backdrop, focus-trap and Escape;
+  // we route Escape (cancel) and backdrop-click through closeModal so there is one teardown path.
+  function openDialog(dialog) {
     closeModal();
     lastFocused = document.activeElement;
-    var overlay = el("div", { cls: "ii-modal-overlay" });
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
-    activeModal = overlay;
-    overlay.addEventListener("click", function (e) {
-      if (e.target === overlay) closeModal();
+    document.body.appendChild(dialog);
+    activeModal = dialog;
+    dialog.addEventListener("cancel", function (e) {
+      e.preventDefault(); // control teardown ourselves (remove node + restore focus)
+      closeModal();
     });
-    document.addEventListener("keydown", modalKeydown, true);
-    focusFirst(modal);
-    return overlay;
+    dialog.addEventListener("click", function (e) {
+      if (e.target === dialog) closeModal(); // click on the backdrop area
+    });
+    try {
+      if (typeof dialog.showModal === "function") {
+        dialog.showModal();
+      }
+    } catch (e) {
+      /* fall through to the attribute fallback below */
+    }
+    if (!dialog.open) {
+      // Environments without full <dialog> top-layer support (older engines / HtmlUnit) still need the
+      // body displayed; showModal() already sets this in real browsers, so we never toggle a live modal.
+      dialog.setAttribute("open", "open");
+    }
+    focusFirst(dialog);
+    return dialog;
   }
 
-  function focusFirst(modal) {
-    var focusTarget = modal.querySelector("button, [href], input, textarea, select");
+  function focusFirst(dialog) {
+    const scope = dialog.querySelector(".jenkins-dialog__contents") || dialog;
+    const focusTarget = scope.querySelector("button, [href], input, textarea, select");
     if (focusTarget) focusTarget.focus();
   }
 
-  // Swap the modal body inside the current overlay (used by the series pager to move between
-  // questions without tearing down/rebuilding the overlay, so there is no flicker). Falls back to a
-  // fresh overlay when nothing is open yet.
-  function replaceModal(modal) {
+  // Swap the dialog body inside the currently-open native dialog (used by the series pager to move
+  // between questions without tearing down/reopening, so there is no flicker). Falls back to opening a
+  // fresh dialog when nothing is open yet.
+  function replaceModal(dialog) {
     if (!activeModal) {
-      return openOverlay(modal);
+      return openDialog(dialog);
     }
     while (activeModal.firstChild) {
       activeModal.removeChild(activeModal.firstChild);
     }
-    activeModal.appendChild(modal);
-    focusFirst(modal);
+    while (dialog.firstChild) {
+      activeModal.appendChild(dialog.firstChild);
+    }
+    focusFirst(activeModal);
     return activeModal;
   }
 
   function showModal(q, opts) {
     opts = opts || {};
-    var readOnly = !!opts.readOnly;
-    var modal = buildModalShell(q, readOnly);
+    const readOnly = !!opts.readOnly;
+    const modal = buildModalShell(q, readOnly);
     if (readOnly) {
       renderAudit(modal, q);
     } else {
       renderForm(modal, q, opts);
     }
-    openOverlay(modal);
+    openDialog(modal);
   }
 
   // ================================ series pager ================================
@@ -552,11 +908,11 @@
   // already-answered ones render read-only so you can review what was chosen. Opened from a build's
   // history badge when that single build (e.g. an agent) has more than one waiting question.
   function buildSeriesNav(ctx) {
-    var nav = el("div", { cls: "ii-series-nav" });
-    var row = el("div", { cls: "ii-series-row" });
-    var prev = el("button", { cls: "ii-btn ii-series-prev", text: "‹ Prev", attrs: { type: "button" } });
-    var pos = el("span", { cls: "ii-series-pos", text: ctx.index + 1 + " / " + ctx.list.length });
-    var next = el("button", { cls: "ii-btn ii-series-next", text: "Next ›", attrs: { type: "button" } });
+    const nav = el("div", { cls: "ii-series-nav" });
+    const row = el("div", { cls: "ii-series-row" });
+    const prev = el("button", { cls: "jenkins-button ii-series-prev", text: "‹ Prev", attrs: { type: "button" } });
+    const pos = el("span", { cls: "ii-series-pos", text: ctx.index + 1 + " / " + ctx.list.length });
+    const next = el("button", { cls: "jenkins-button ii-series-next", text: "Next ›", attrs: { type: "button" } });
     prev.disabled = ctx.index <= 0;
     next.disabled = ctx.index >= ctx.list.length - 1;
     prev.addEventListener("click", function () {
@@ -570,12 +926,12 @@
     row.appendChild(next);
     nav.appendChild(row);
 
-    var pips = el("div", { cls: "ii-series-pips" });
+    const pips = el("div", { cls: "ii-series-pips" });
     ctx.list.forEach(function (q, i) {
-      var cls = "ii-pip";
+      let cls = "ii-pip";
       if (i === ctx.index) cls += " ii-current";
       if (ctx.answered[q.id]) cls += " ii-done";
-      var pip = el("button", {
+      const pip = el("button", {
         cls: cls,
         text: String(i + 1),
         attrs: { type: "button", "aria-label": "Go to question " + (i + 1) }
@@ -591,7 +947,7 @@
 
   function openSeries(questions, opts) {
     opts = opts || {};
-    var list = (questions || []).filter(function (q) {
+    const list = (questions || []).filter(function (q) {
       return !q.status || q.status === "WAITING";
     });
     if (list.length <= 1) {
@@ -600,30 +956,30 @@
       }
       return;
     }
-    var answered = {};
+    const answered = {};
     // Per-question drafts (unsubmitted free text / selected choice), keyed by question id, so paging
     // between slides no longer discards what the user typed. The list items already carry full detail
     // (prompt/choices/allowFreeText/contextHtml/canAnswer) from the list endpoint, so slides render
     // straight from them — the previous per-navigation re-fetch is what rebuilt the form empty and
     // dropped the draft.
-    var drafts = {};
-    var ctx = { list: list, index: 0, answered: answered };
+    const drafts = {};
+    const ctx = { list: list, index: 0, answered: answered };
 
     // Snapshot the current slide's in-progress answer before we navigate away from it.
     function captureDraft() {
-      var q = list[ctx.index];
+      const q = list[ctx.index];
       if (!q || answered[q.id] || !activeModal) {
         return;
       }
-      var ta = activeModal.querySelector(".ii-freetext textarea");
-      var radio = activeModal.querySelector('input[name="ii-choice"]:checked');
+      const ta = activeModal.querySelector(".ii-freetext textarea");
+      const radio = activeModal.querySelector('input[name="ii-choice"]:checked');
       drafts[q.id] = { freeText: ta ? ta.value : "", choiceId: radio ? radio.value : null };
     }
 
     function render(q) {
-      var isDone = !!answered[q.id] || (q.status && q.status !== "WAITING");
-      var modal = buildModalShell(q, isDone);
-      modal.appendChild(buildSeriesNav(ctx));
+      const isDone = !!answered[q.id] || (q.status && q.status !== "WAITING");
+      const modal = buildModalShell(q, isDone);
+      dialogBody(modal).appendChild(buildSeriesNav(ctx));
       if (isDone) {
         renderAudit(modal, q);
       } else {
@@ -654,13 +1010,13 @@
       render(list[i]);
     };
     ctx.next = function () {
-      for (var i = ctx.index + 1; i < list.length; i++) {
+      for (let i = ctx.index + 1; i < list.length; i++) {
         if (!answered[list[i].id]) {
           ctx.goTo(i);
           return;
         }
       }
-      for (var j = 0; j < list.length; j++) {
+      for (let j = 0; j < list.length; j++) {
         if (!answered[list[j].id]) {
           ctx.goTo(j);
           return;
@@ -676,7 +1032,7 @@
 
   // ----- shared visibility-aware polling loop -----
   function scheduleLoop(fn) {
-    var timer = null;
+    let timer = null;
     function tick() {
       if (timer) clearTimeout(timer);
       if (document.hidden) return;
@@ -690,16 +1046,155 @@
     tick();
   }
 
+  // ============================ browser-tab notifier ============================
+  // Mirror the viewer's pending-question count in the browser tab so a backgrounded/other tab still shows
+  // there is something to answer. Driven by the bell's existing poll (no extra traffic) and gated by the
+  // Appearance "browser-tab badge" toggle (data-tab-badge). Everything is wrapped in try/catch — a
+  // cosmetic tab update must never break the page.
+  //
+  // Two presentation modes, re-chosen on every paint from the CURRENT favicon (a theme such as the Simple
+  // Theme plugin swaps the icon on load — it removes every rel~="icon" link and appends its own):
+  //   * SAME-ORIGIN favicon  -> paint a small red dot ON TOP of it and leave the tab TITLE untouched. A
+  //     <canvas> may only read pixels from a same-origin image, so this is the only case where a real dot
+  //     on the favicon is technically possible.
+  //   * CROSS-ORIGIN or missing favicon -> the browser forbids reading its pixels into a canvas (verified
+  //     live: a custom nokia.com favicon returns Access-Control-Allow-Origin: *.nokia.com, which does not
+  //     match the Jenkins origin, so the crossOrigin load fails). A dot therefore cannot be composited, so
+  //     we fall back to a text badge on the tab TITLE: a red-circle glyph (U+1F534 emoji) + "(N) " + the
+  //     original title. The red comes from the emoji itself because tab-title text cannot be CSS-coloured.
+  //     The favicon is left EXACTLY as the theme set it.
+  // We NEVER replace the site's favicon with a different image (doing so previously clobbered custom icons).
+  let tabBadgeEnabled = true;
+  let tabBaseTitle = null;
+  // { link, baseHref } for the link we last badged, so we can restore it and re-badge without mistaking
+  // our own generated data: URL for the clean base.
+  let faviconState = null;
+
+  function activeFaviconLink() {
+    // The primary icon the browser renders: prefer an exact rel="icon", else any rel~="icon".
+    return document.querySelector("link[rel='icon']") || document.querySelector("link[rel~='icon']");
+  }
+
+  function stripTabBadge(title) {
+    // Recover the clean base title by removing a badge prefix we may have added — the red-circle-emoji
+    // form ("\uD83D\uDD34 (N) ") or a legacy "(N) " — so prefixes never stack up across polls/navigations.
+    return (title || "").replace(/^\uD83D\uDD34\s*\(\d+\+?\)\s+/, "").replace(/^\(\d+\+?\)\s+/, "");
+  }
+
+  function faviconBase() {
+    // The clean (non-data:) href of the active icon link, resolving our own composited data: URL back to
+    // the base we recorded. Returns null when there is no icon link to work from.
+    const link = activeFaviconLink();
+    if (!link) return null;
+    let href = link.getAttribute("href") || "";
+    if (href.indexOf("data:") === 0) {
+      href = faviconState && faviconState.baseHref ? faviconState.baseHref : "";
+    }
+    return href ? { link: link, href: href } : null;
+  }
+
+  function faviconIsSameOrigin() {
+    // Only a same-origin favicon can be read into a canvas; a theme's absolute cross-origin URL cannot.
+    // Relative/root-relative hrefs resolve to our own origin and count as same-origin.
+    const base = faviconBase();
+    if (!base) return false;
+    try {
+      return new URL(base.href, location.href).origin === location.origin;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function restoreFavicon() {
+    if (faviconState && faviconState.link && faviconState.link.parentNode && faviconState.baseHref != null) {
+      faviconState.link.setAttribute("href", faviconState.baseHref);
+    }
+  }
+
+  function paintFavicon(n) {
+    const link = activeFaviconLink();
+    if (!link) {
+      return; // no favicon link at all — do NOT create one (that would override the theme's own icon)
+    }
+    if (n <= 0) {
+      restoreFavicon();
+      return;
+    }
+    const href = link.getAttribute("href") || "";
+    if (href.indexOf("data:") === 0) {
+      // The active link already holds a data: URL — either our badge (already showing) or one we did not
+      // create and must not clobber. Either way there is nothing safe to re-capture; leave it.
+      return;
+    }
+    // A fresh, readable base href. Record it (so a later theme swap that replaces the link is picked up
+    // on the next paint from the NEW link's clean href) and composite the dot.
+    faviconState = { link: link, baseHref: href };
+    const src = href;
+    const img = new Image();
+    img.crossOrigin = "anonymous"; // needed to read cross-origin pixels into the canvas; harmless same-origin
+    img.onload = function () {
+      try {
+        const size = 32;
+        const canvas = document.createElement("canvas");
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, size, size);
+        const r = 9;
+        ctx.beginPath();
+        ctx.arc(size - r, r, r, 0, 2 * Math.PI);
+        ctx.fillStyle = "#e60000";
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "#fff";
+        ctx.stroke();
+        // Only mutate the link if it is still the active one and still shows the clean base, so we never
+        // stomp a favicon the theme swapped in between the load starting and this callback firing.
+        if (activeFaviconLink() === link && (link.getAttribute("href") || "") === src) {
+          link.setAttribute("href", canvas.toDataURL("image/png"));
+        }
+      } catch (e) {
+        /* tainted (cross-origin without CORS) or unsupported canvas — keep the current favicon as-is */
+      }
+    };
+    img.onerror = noop; // cross-origin without CORS, or a missing image -> leave the favicon untouched
+    try {
+      img.src = src;
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  function updateTabIndicator(n) {
+    try {
+      if (tabBaseTitle == null) {
+        tabBaseTitle = stripTabBadge(document.title || "Jenkins");
+      }
+      if (faviconIsSameOrigin()) {
+        // Preferred: red dot on the readable favicon; keep the tab title clean.
+        document.title = tabBaseTitle;
+        paintFavicon(n);
+      } else {
+        // Fallback: a cross-origin/missing favicon can't be badged — mark the TITLE, leave the icon alone.
+        // "\uD83D\uDD34" is the U+1F534 red-circle emoji (renders red via the client OS emoji font).
+        const capped = n > 99 ? "99+" : String(n);
+        document.title = n > 0 ? "\uD83D\uDD34 (" + capped + ") " + tabBaseTitle : tabBaseTitle;
+      }
+    } catch (e) {
+      /* never let a cosmetic tab update break the page */
+    }
+  }
+
   // ================================ global nav bell ================================
   function anchorBell(container) {
     // Prefer inline placement among the header controls so the bell never overlaps the settings gear.
-    var selectors = [
+    const selectors = [
       ".jenkins-header__actions",
       "#page-header .page-header__hyperlinks",
       "header#page-header .jenkins-header__actions"
     ];
-    for (var i = 0; i < selectors.length; i++) {
-      var host = document.querySelector(selectors[i]);
+    for (let i = 0; i < selectors.length; i++) {
+      const host = document.querySelector(selectors[i]);
       if (host) {
         container.classList.add("ii-bell-inline");
         host.insertBefore(container, host.firstChild);
@@ -713,7 +1208,7 @@
 
   // Use the server-rendered <l:icon> (the operator's chosen Ionicon) if present, else a default bell.
   function setBellIcon(bellBtn, mount) {
-    var tpl = mount.querySelector(".ii-icon-template svg");
+    const tpl = mount.querySelector(".ii-icon-template svg");
     if (tpl) {
       bellBtn.appendChild(tpl.cloneNode(true));
     } else {
@@ -725,55 +1220,62 @@
   }
 
   function mountBell(mount) {
-    var richModal = attr(mount, "data-rich-modal", "true") === "true";
-    var initialCount = parseInt(attr(mount, "data-initial-count", "0"), 10) || 0;
-    var job = attr(mount, "data-job", "") || "";
+    const richModal = attr(mount, "data-rich-modal", "true") === "true";
+    const initialCount = parseInt(attr(mount, "data-initial-count", "0"), 10) || 0;
+    const job = attr(mount, "data-job", "") || "";
+    // Appearance toggle: whether to mirror the count in the browser tab (title + favicon dot). On by
+    // default; drives the shared updateTabIndicator below. Default true keeps older mounts working.
+    tabBadgeEnabled = attr(mount, "data-tab-badge", "true") === "true";
     // Dashboard => every answerable question; inside a pipeline => only that pipeline's questions.
-    var listUrl = job ? apiBase + "/questions?job=" + encodeURIComponent(job) : apiBase + "/questions";
-    var headerText = job ? "Pending for this pipeline" : "Pending questions";
+    const listUrl = job ? apiBase + "/questions?job=" + encodeURIComponent(job) : apiBase + "/questions";
+    const headerText = job ? "Pending for this pipeline" : "Pending questions";
 
-    var bellBtn = el("button", {
+    const bellBtn = el("button", {
       cls: "ii-bell-btn",
       attrs: {
         type: "button",
         "aria-label": "Pending interactive input questions",
         "aria-haspopup": "true",
         "aria-expanded": "false",
-        title: "Interactive Input"
+        tooltip: "Interactive Input"
       }
     });
     setBellIcon(bellBtn, mount);
-    var badge = el("span", { cls: "ii-bell-badge", attrs: { "aria-hidden": "false" } });
+    // B14: start hidden via the core jenkins-hidden class and toggle it in setCount, so we never
+    // hard-code the "shown" display value (the badge's shown layout lives in bell.css).
+    const badge = el("span", { cls: "ii-bell-badge jenkins-hidden", attrs: { "aria-hidden": "false" } });
     bellBtn.appendChild(badge);
 
-    var dropdown = el("div", {
+    const dropdown = el("div", {
       cls: "ii-dropdown",
       attrs: { role: "menu", "aria-label": "Pending questions", hidden: "hidden" }
     });
 
-    var container = el("div", { cls: "ii-bell-container" });
+    const container = el("div", { cls: "ii-bell-container" });
     container.appendChild(bellBtn);
     container.appendChild(dropdown);
     anchorBell(container);
     if (mount.parentNode) mount.parentNode.removeChild(mount);
 
-    var questionsCache = [];
+    let questionsCache = [];
 
     function setCount(n) {
       if (n > 0) {
         badge.textContent = n > 99 ? "99+" : String(n);
-        badge.style.display = "inline-flex";
-        bellBtn.classList.add("ii-has-pending");
+        badge.classList.remove("jenkins-hidden");
       } else {
         badge.textContent = "";
-        badge.style.display = "none";
-        bellBtn.classList.remove("ii-has-pending");
+        badge.classList.add("jenkins-hidden");
+      }
+      // Mirror the pending count in the browser tab (title + favicon dot) when the toggle is on.
+      if (tabBadgeEnabled) {
+        updateTabIndicator(n);
       }
     }
     setCount(initialCount);
 
     function toggleDropdown(force) {
-      var show = force != null ? force : dropdown.hasAttribute("hidden");
+      const show = force != null ? force : dropdown.hasAttribute("hidden");
       if (show) {
         renderDropdown();
         dropdown.removeAttribute("hidden");
@@ -791,9 +1293,9 @@
         dropdown.appendChild(el("div", { cls: "ii-empty", text: "Nothing waiting for you right now." }));
         return;
       }
-      var list = el("ul", { cls: "ii-list", attrs: { role: "none" } });
+      const list = el("ul", { cls: "ii-list", attrs: { role: "none" } });
       questionsCache.slice(0, 10).forEach(function (q) {
-        var item = el("li", { attrs: { role: "none" } });
+        const item = el("li", { attrs: { role: "none" } });
         item.appendChild(
           questionListItem(q, function () {
             toggleDropdown(false);
@@ -837,8 +1339,10 @@
   }
 
   // ================================ per-project widgets ================================
-  function mountListWidget(mount, url, rowFactory, emptyText) {
-    var listWrap = el("div", { cls: "ii-widget" });
+  function mountListWidget(mount, url, rowFactory, emptyText, opts) {
+    opts = opts || {};
+    const onData = opts.onData || noop;
+    const listWrap = el("div", { cls: "ii-widget" });
     mount.appendChild(listWrap);
 
     function render(questions) {
@@ -847,9 +1351,9 @@
         listWrap.appendChild(el("div", { cls: "ii-empty", text: emptyText }));
         return;
       }
-      var ul = el("ul", { cls: "ii-list" });
+      const ul = el("ul", { cls: "ii-list" });
       questions.forEach(function (q) {
-        var li = el("li");
+        const li = el("li");
         li.appendChild(rowFactory(q, refresh));
         ul.appendChild(li);
       });
@@ -861,6 +1365,7 @@
         .then(function (r) {
           if (r.ok && r.body && Array.isArray(r.body.questions)) {
             render(r.body.questions);
+            onData(r.body.questions);
           }
         })
         .catch(noop);
@@ -876,32 +1381,56 @@
   }
 
   function mountJobWidget(mount) {
-    var job = attr(mount, "data-job", "");
-    var richModal = attr(mount, "data-rich-modal", "true") === "true";
-    var url = apiBase + "/questions?job=" + encodeURIComponent(job);
+    const job = attr(mount, "data-job", "");
+    const richModal = attr(mount, "data-rich-modal", "true") === "true";
+    const url = apiBase + "/questions?job=" + encodeURIComponent(job);
+    // The inline job-page box (jobMain.jelly) wraps this mount in a .ii-jobcard that is always in the
+    // DOM but starts hidden (jenkins-hidden) when nothing is pending, so the box can appear on the very
+    // next poll instead of only after a full page reload. Toggle its visibility with the scoped count.
+    // The action's own page (index.jelly) has no such wrapper, so it always shows (empty text included).
+    const card = mount.closest ? mount.closest(".ii-jobcard") : null;
     mountListWidget(
       mount,
       url,
       function (q, refresh) {
-        return questionListItem(q, function () {
-          openQuestion(q, { richModal: richModal, onDone: refresh });
-        });
+        return questionListItem(
+          q,
+          function () {
+            openQuestion(q, { richModal: richModal, onDone: refresh });
+          },
+          { withBar: true }
+        );
       },
-      "All caught up — nothing waiting."
+      "All caught up — nothing waiting.",
+      {
+        onData: function (questions) {
+          if (card) {
+            card.classList.toggle("jenkins-hidden", questions.length === 0);
+          }
+        }
+      }
     );
   }
 
   function mountAuditWidget(mount) {
-    var job = attr(mount, "data-job", "");
-    var build = attr(mount, "data-build", "");
-    var url =
+    const job = attr(mount, "data-job", "");
+    const build = attr(mount, "data-build", "");
+    const richModal = attr(mount, "data-rich-modal", "true") === "true";
+    const url =
       apiBase + "/questions?job=" + encodeURIComponent(job) + "&build=" + encodeURIComponent(build);
     mountListWidget(
       mount,
       url,
-      function (q) {
+      function (q, refresh) {
         return auditRow(q, function () {
-          openQuestion(q, { readOnly: true });
+          // B1: a build/run-page question that is still WAITING must open the *actionable* dialog (the
+          // same one the job page opens), not the read-only audit view. Settled questions stay
+          // read-only. This is what makes Approve/Deny work from the run page.
+          if (!q.status || q.status === "WAITING") {
+            openQuestion(q, { richModal: richModal, onDone: refresh });
+          } else {
+            openQuestion(q, { readOnly: true });
+          }
         });
       },
       "No interactive-input records for this build (they may have been compacted — see the build console)."
@@ -909,18 +1438,19 @@
   }
 
   // ============================ live sidebar task-link count ============================
-  // Keeps the left-sidebar "Interactive Input (N)" link's number live (Point 2). Core renders that
-  // link server-side once per page load, so without this the count only refreshes on reload. The
-  // always-present [data-ii-tasklink] controller (jobMain.jelly) polls the scoped count and updates
-  // the link text, hides the row at zero, and best-effort reveals it when a question first appears.
+  // Keeps the left-sidebar "Interactive Input" link's pending-count badge live (Point 2). Core
+  // renders that link server-side once per page load, so without this the count only refreshes on
+  // reload. The always-present [data-ii-tasklink] controller (jobMain.jelly) polls the scoped count,
+  // renders it as a native jenkins-badge pill next to the label (not "(N)" text), hides the row at
+  // zero, and best-effort reveals it when a question first appears.
   function mountTaskLink(mount) {
-    var job = attr(mount, "data-job", "");
+    const job = attr(mount, "data-job", "");
     if (!job) {
       return;
     }
-    var jobUrl = rootUrl + "/job/" + job.split("/").join("/job/") + "/";
-    var expectedHref = jobUrl + "interactive-input/";
-    var url = apiBase + "/questions?job=" + encodeURIComponent(job);
+    const jobUrl = rootUrl + "/job/" + job.split("/").join("/job/") + "/";
+    const expectedHref = jobUrl + "interactive-input/";
+    const url = apiBase + "/questions?job=" + encodeURIComponent(job);
 
     // Compare hrefs by path only, ignoring the origin and any trailing slash. Core renders this link
     // WITHOUT a trailing slash (…/interactive-input) while we build expectedHref WITH one; an exact
@@ -929,11 +1459,11 @@
     function normPath(href) {
       return href.replace(/^https?:\/\/[^/]+/, "").replace(/\/+$/, "");
     }
-    var expectedPath = normPath(expectedHref);
+    const expectedPath = normPath(expectedHref);
 
     function findLink() {
-      var anchors = document.querySelectorAll("#tasks a[href], #side-panel a[href], .task a[href]");
-      for (var i = 0; i < anchors.length; i++) {
+      const anchors = document.querySelectorAll("#tasks a[href], #side-panel a[href], .task a[href]");
+      for (let i = 0; i < anchors.length; i++) {
         if (normPath(anchors[i].getAttribute("href") || "") === expectedPath) {
           return anchors[i];
         }
@@ -945,15 +1475,17 @@
       return (link.closest && link.closest(".task")) || link.parentNode || link;
     }
 
+    const LABEL = "Interactive Input";
+
     function setLabel(link, text) {
-      var span = link.querySelector(".task-link-text");
+      const span = link.querySelector(".task-link-text");
       if (span) {
         span.textContent = text;
         return;
       }
       // Fallback: rewrite the last non-empty text node so the icon (if any) is preserved.
-      for (var i = link.childNodes.length - 1; i >= 0; i--) {
-        var node = link.childNodes[i];
+      for (let i = link.childNodes.length - 1; i >= 0; i--) {
+        const node = link.childNodes[i];
         if (node.nodeType === 3 && node.textContent.trim()) {
           node.textContent = text;
           return;
@@ -962,43 +1494,64 @@
       link.appendChild(document.createTextNode(text));
     }
 
-    function injectLink(text) {
-      var tasks = document.querySelector("#tasks");
+    // Render the pending count as a native Jenkins pill (jenkins-badge), like the "Updates N" badge
+    // on the Plugins page, instead of appending "(N)" to the label. Visibility is toggled via the
+    // core jenkins-hidden class so we never hard-code a display value.
+    function setBadge(link, n) {
+      let badge = link.querySelector(".ii-task-badge");
+      if (n > 0) {
+        if (!badge) {
+          badge = el("span", { cls: "ii-task-badge jenkins-badge jenkins-!-danger-color" });
+          link.appendChild(badge);
+        }
+        badge.textContent = n > 99 ? "99+" : String(n);
+        badge.setAttribute("aria-label", n + " pending");
+        badge.classList.remove("jenkins-hidden");
+      } else if (badge) {
+        badge.classList.add("jenkins-hidden");
+      }
+    }
+
+    function injectLink() {
+      const tasks = document.querySelector("#tasks");
       if (!tasks) {
         return null;
       }
-      var sample = tasks.querySelector(".task");
+      const sample = tasks.querySelector(".task");
       if (!sample) {
         return null;
       }
-      var clone = sample.cloneNode(true);
+      const clone = sample.cloneNode(true);
       clone.setAttribute("data-ii-injected", "true");
-      var a = clone.querySelector("a[href]");
+      const a = clone.querySelector("a[href]");
       if (!a) {
         return null;
       }
       a.setAttribute("href", expectedHref);
       a.removeAttribute("id");
-      setLabel(a, text);
+      setLabel(a, LABEL);
       tasks.appendChild(clone);
       return a;
     }
 
+    // B14: show/hide the sidebar row by toggling the core jenkins-hidden class rather than writing an
+    // inline display value, so we don't hard-code what the row's shown display should be.
     function apply(n) {
-      var text = "Interactive Input" + (n > 0 ? " (" + n + ")" : "");
-      var link = findLink();
+      let link = findLink();
       if (n > 0) {
         if (!link) {
-          link = injectLink(text);
+          link = injectLink();
           if (!link) {
             return; // sidebar shape unknown — nothing safe to do; reload will render it server-side
           }
         } else {
-          setLabel(link, text);
+          setLabel(link, LABEL);
         }
-        taskRow(link).style.display = "";
+        setBadge(link, n);
+        taskRow(link).classList.remove("jenkins-hidden");
       } else if (link) {
-        taskRow(link).style.display = "none";
+        setBadge(link, 0);
+        taskRow(link).classList.add("jenkins-hidden");
       }
     }
 
@@ -1047,7 +1600,7 @@
   }
 
   function waitingFrom(body) {
-    var qs = body && Array.isArray(body.questions) ? body.questions : [];
+    const qs = body && Array.isArray(body.questions) ? body.questions : [];
     return qs.filter(function (q) {
       return q.status === "WAITING";
     });
@@ -1067,32 +1620,30 @@
 
   function openBadge(badge) {
     adoptRootUrl(badge);
-    var job = badge.getAttribute("data-job") || "";
-    var build = badge.getAttribute("data-build") || "";
-    ensureCrumb().then(function () {
-      fetchJson(buildQuestionsUrl(job, build))
-        .then(function (r) {
-          var waiting = r.ok ? waitingFrom(r.body) : [];
-          if (!waiting.length) {
-            removeBadge(badge); // already settled elsewhere — clear the stale dot
-            return;
-          }
-          var onDone = function () {
-            refreshBadge(badge, job, build);
-          };
-          // A build with several waiting questions opens the series pager; a single one opens directly.
-          if (waiting.length > 1) {
-            openSeries(waiting, { richModal: richModalDefault, onDone: onDone });
-          } else {
-            openQuestion(waiting[0], { richModal: richModalDefault, onDone: onDone });
-          }
-        })
-        .catch(noop);
-    });
+    const job = badge.getAttribute("data-job") || "";
+    const build = badge.getAttribute("data-build") || "";
+    fetchJson(buildQuestionsUrl(job, build))
+      .then(function (r) {
+        const waiting = r.ok ? waitingFrom(r.body) : [];
+        if (!waiting.length) {
+          removeBadge(badge); // already settled elsewhere — clear the stale dot
+          return;
+        }
+        const onDone = function () {
+          refreshBadge(badge, job, build);
+        };
+        // A build with several waiting questions opens the series pager; a single one opens directly.
+        if (waiting.length > 1) {
+          openSeries(waiting, { richModal: richModalDefault, onDone: onDone });
+        } else {
+          openQuestion(waiting[0], { richModal: richModalDefault, onDone: onDone });
+        }
+      })
+      .catch(noop);
   }
 
   document.addEventListener("click", function (e) {
-    var badge = closestBadge(e.target);
+    const badge = closestBadge(e.target);
     if (!badge) {
       return;
     }
@@ -1103,15 +1654,63 @@
   // A question answered from any other surface on the page (bell / job box) should also clear the
   // matching build's badge.
   document.addEventListener("ii:answered", function (e) {
-    var d = e && e.detail;
+    const d = e && e.detail;
     toArray(document.querySelectorAll("[data-ii-badge]")).forEach(function (badge) {
-      var job = badge.getAttribute("data-job");
-      var build = badge.getAttribute("data-build");
+      const job = badge.getAttribute("data-job");
+      const build = badge.getAttribute("data-build");
       if (d && d.job && d.build != null && (job !== d.job || build !== String(d.build))) {
         return; // unrelated build — leave it alone
       }
       refreshBadge(badge, job, build);
     });
+  });
+
+  // ============================ console "open" link (delegated) ============================
+  // The step logs a console link (see OpenInteractiveInputNote) carrying data-ii-open=<questionId> and
+  // data-root-url=<contextPath>. Intercept clicks on it so the question's dialog opens IN PLACE on
+  // whatever page shows the link — the build's Console Output above all — instead of navigating to the
+  // audit page first (B6). Delegated (like the build badge) so it works even when this link is the only
+  // interactive-input surface on the page. If the fetch fails (unknown/compacted question, REST disabled
+  // or no permission) we fall back to the link's real href, which navigates to the auto-opening audit page.
+  function closestOpenLink(node) {
+    while (node && node.nodeType === 1) {
+      if (node.hasAttribute && node.hasAttribute("data-ii-open")) {
+        return node;
+      }
+      node = node.parentNode;
+    }
+    return null;
+  }
+
+  function openConsoleLink(link) {
+    adoptRootUrl(link); // resolve apiBase from the link's data-root-url when no mount discovered one
+    const id = link.getAttribute("data-ii-open") || "";
+    const href = link.getAttribute("href");
+    fetchJson(apiBase + "/questions/" + encodeURIComponent(id))
+      .then(function (r) {
+        if (!r || !r.ok || !r.body || !r.body.id) {
+          if (href) window.location.href = href; // fall back to the deep-link (audit page auto-opens)
+          return;
+        }
+        const q = r.body;
+        if (!q.status || q.status === "WAITING") {
+          openQuestion(q, { richModal: richModalDefault });
+        } else {
+          openQuestion(q, { readOnly: true });
+        }
+      })
+      .catch(function () {
+        if (href) window.location.href = href;
+      });
+  }
+
+  document.addEventListener("click", function (e) {
+    const link = closestOpenLink(e.target);
+    if (!link) {
+      return;
+    }
+    e.preventDefault();
+    openConsoleLink(link);
   });
 
   // ----- bootstrap -----
@@ -1132,15 +1731,44 @@
     pollSeconds = Math.max(5, parseInt(attr(cfgSrc, "data-poll-seconds", "15"), 10) || 15);
   }
 
+  // B6 console deep-link: the step logs .../interactive-input/?open=<questionId>. When that param is
+  // present, open the question's shared dialog directly (actionable while WAITING, read-only once
+  // settled) so the console link lands the operator on the answer form in one click. Permission to
+  // answer stays enforced server-side on submit.
+  function getQueryParam(name) {
+    const re = new RegExp("[?&]" + name + "=([^&#]*)");
+    const m = re.exec(window.location.search || "");
+    return m ? decodeURIComponent(m[1].replace(/\+/g, " ")) : null;
+  }
+
+  function maybeOpenDeepLink() {
+    const id = getQueryParam("open");
+    if (!id) {
+      return;
+    }
+    fetchJson(apiBase + "/questions/" + encodeURIComponent(id))
+      .then(function (r) {
+        if (!r || !r.ok || !r.body || !r.body.id) {
+          return; // unknown/compacted question, or no permission — leave the page as-is
+        }
+        const q = r.body;
+        if (!q.status || q.status === "WAITING") {
+          openQuestion(q, { richModal: richModalDefault });
+        } else {
+          openQuestion(q, { readOnly: true });
+        }
+      })
+      .catch(noop);
+  }
+
   function boot() {
     discover();
     if (bellMount || widgetMounts.length || auditMounts.length || taskLinkMounts.length) {
-      ensureCrumb().then(function () {
-        if (bellMount) mountBell(bellMount);
-        widgetMounts.forEach(mountJobWidget);
-        auditMounts.forEach(mountAuditWidget);
-        taskLinkMounts.forEach(mountTaskLink);
-      });
+      if (bellMount) mountBell(bellMount);
+      widgetMounts.forEach(mountJobWidget);
+      auditMounts.forEach(mountAuditWidget);
+      taskLinkMounts.forEach(mountTaskLink);
+      maybeOpenDeepLink();
     }
   }
 

@@ -24,11 +24,12 @@ import jenkins.model.TransientActionFactory;
  *       questions (rendered by {@code WorkflowJob/main.jelly} and {@code AbstractProject/main.jelly}
  *       which iterate {@code allActions} and include each action's {@code jobMain.jelly}). It
  *       self-hides when nothing is pending.</li>
- *   <li>{@code index.jelly} — the action's own page (reached via the left-sidebar link that appears
- *       only when there are pending questions, driven by {@link #getIconFileName()}). While showing,
- *       its "{@code (N)}" count is kept live client-side by the always-present {@code data-ii-tasklink}
- *       controller in {@code jobMain.jelly} (see {@code bell.js}), so it no longer goes stale until a
- *       page reload.</li>
+     *   <li>{@code index.jelly} — the action's own page (reached via the left-sidebar link that appears
+     *       only when there are pending questions, driven by {@link #getIconFileName()}). While showing,
+     *       its pending count is kept live client-side by the always-present {@code data-ii-tasklink}
+     *       controller in {@code jobMain.jelly} (see {@code bell.js}) — rendered as a native
+     *       {@code jenkins-badge} pill next to the label rather than "{@code (N)}" text — so it no longer
+     *       goes stale until a page reload.</li>
  * </ul>
  *
  * <p>Both surfaces mount the shared JS widget, which polls the scoped REST endpoint
@@ -108,8 +109,10 @@ public class InteractiveInputJobAction implements Action {
     @Override
     @NonNull
     public String getDisplayName() {
-        int n = getPendingCount();
-        return n > 0 ? "Interactive Input (" + n + ")" : "Interactive Input";
+        // The pending count is shown as a native jenkins-badge pill added client-side (see bell.js
+        // mountTaskLink), not baked into the label text, so the sidebar link matches Jenkins
+        // conventions (e.g. the "Updates N" badge on the Plugins page).
+        return "Interactive Input";
     }
 
     @Override

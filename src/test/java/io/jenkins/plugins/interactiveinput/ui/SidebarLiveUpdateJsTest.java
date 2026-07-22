@@ -2,6 +2,7 @@ package io.jenkins.plugins.interactiveinput.ui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import hudson.model.FreeStyleProject;
@@ -58,8 +59,11 @@ class SidebarLiveUpdateJsTest {
             HtmlAnchor link = (HtmlAnchor) links.get(0);
             assertTrue(link.isDisplayed(), "the link is visible while a question is pending");
             assertTrue(
-                    link.asNormalizedText().contains("Interactive Input (1)"),
-                    "the sidebar carries the pending count");
+                    link.asNormalizedText().contains("Interactive Input"),
+                    "the sidebar keeps the 'Interactive Input' label");
+            var badge = link.querySelector(".ii-task-badge");
+            assertNotNull(badge, "the pending count renders as a native jenkins-badge pill, not '(N)' text");
+            assertEquals("1", badge.getTextContent().trim(), "the badge shows the pending count");
 
             // Answer it and fire the same event the modals dispatch after a successful answer.
             store.answer("n1", "yes", null, "tester", "test");

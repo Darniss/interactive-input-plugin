@@ -69,7 +69,7 @@ class SeriesDraftRetentionTest {
             ((HtmlElement) page.querySelector("#ii-test-badge")).click();
             wc.waitForBackgroundJavaScript(2000);
 
-            HtmlTextArea slide1 = (HtmlTextArea) page.querySelector(".ii-modal .ii-freetext textarea");
+            HtmlTextArea slide1 = (HtmlTextArea) page.querySelector(".ii-dialog .ii-freetext textarea");
             assertNotNull(slide1, "the first series slide must show a free-text field");
             slide1.setText(DRAFT);
 
@@ -79,7 +79,7 @@ class SeriesDraftRetentionTest {
             ((HtmlElement) page.querySelector(".ii-series-prev")).click();
             wc.waitForBackgroundJavaScript(1000);
 
-            HtmlTextArea slide1Again = (HtmlTextArea) page.querySelector(".ii-modal .ii-freetext textarea");
+            HtmlTextArea slide1Again = (HtmlTextArea) page.querySelector(".ii-dialog .ii-freetext textarea");
             assertNotNull(slide1Again, "the first slide must render again after paging back");
             assertEquals(DRAFT, slide1Again.getText(), "the typed draft must survive paging away and back");
         }

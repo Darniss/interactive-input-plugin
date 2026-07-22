@@ -5,7 +5,7 @@
  *
  * Runs the full Maven build (compile, unit tests, SpotBugs, HPI) across the
  * platforms/JDKs below. The Jenkins hosting checker requires jdk 21 or 25 in
- * buildPlugin; both platforms build on JDK 21 (bytecode targets the baseline's Java 17).
+ * buildPlugin; both platforms build on JDK 21 (the 2.568 baseline requires Java 21).
  */
 buildPlugin(
   useContainerAgent: true,
