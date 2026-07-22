@@ -111,6 +111,17 @@ flowchart LR
 
 A paused step registers a `Question` in a durable, permission‑aware `QuestionStore`. The bell polls the REST API for questions the current user may answer; the modal (or any external agent) answers via `POST …/answer`; the store resolves the question and the pipeline resumes, throws (`abort`), or times out (SLA). Question metadata survives a controller restart via XStream; transient resolvers are re‑attached on step resume.
 
+### The pause → approve → resume flow
+
+What a person actually experiences, end to end:
+
+1. **Pause.** The build reaches `askInteractive(...)` (or a bridged native `input`) and suspends — *without* holding an executor. The stage shows **Paused** in the Pipeline Graph View, and the build **Console Output** gets an anchored *"Open interactive input"* link.
+2. **Notice.** Everyone allowed to answer sees the pending question as soon as it appears — on the header bell, the job‑page box, the build‑history badge and the sidebar — kept fresh by polling, so no page reload is needed.
+3. **Approve / answer.** A human opens the rich modal from any of those surfaces (or the console link) and **Approves**, **Denies**, picks a choice, or types an answer; an authorised agent can do the same via `POST …/answer`. Permissions are re‑checked server‑side on every answer.
+4. **Resume.** On answer the build **continues from where it paused** with the returned value; **Deny** aborts the build (exactly like `input`); an unanswered question **auto‑expires** on its SLA. Either way the outcome (who answered and what they chose) is written to the console and the per‑build audit page.
+
+A restart mid‑pause is safe: the question is persisted, and the build re‑attaches to it (and resumes immediately if it was answered while the controller was down).
+
 ---
 
 ## Quick start
