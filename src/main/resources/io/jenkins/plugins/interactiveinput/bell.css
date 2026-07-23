@@ -284,6 +284,31 @@
   }
 }
 
+/*
+ * B5 run-page attention indicator — a native build summary row (summary.jelly) that stays hidden until
+ * the build is waiting for input, then reveals with a red "input needed" cue that gently pulses
+ * (reusing ii-attn-pulse, the same attention pulse as the build-list badge and the job-page box). The
+ * icon cell and the click-to-answer link share the error colour so it reads as "needs attention". The
+ * link keeps its href (the per-build audit page) as a no-JS fallback; bell.js opens in place with JS.
+ */
+.ii-runbox-row > td:first-child,
+.ii-runbox {
+  color: var(--error-color, #d54c53);
+  animation: ii-attn-pulse 1.7s ease-in-out infinite;
+}
+
+.ii-runbox {
+  font-weight: 600;
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ii-runbox-row > td:first-child,
+  .ii-runbox {
+    animation: none;
+  }
+}
+
 /* status pills (audit view) */
 .ii-pill {
   display: inline-block;

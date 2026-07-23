@@ -412,6 +412,27 @@ public class QuestionStore {
     }
 
     /**
+     * @return the number of WAITING questions to surface for the current user on a single build,
+     *     honouring the user-scope and lock-to-starter switches. Drives the run-page sidebar count
+     *     badge (the per-build equivalent of {@link #countNotificationsForJob(String)}).
+     */
+    public int countNotificationsForBuild(@NonNull String jobFullName, int buildNumber) {
+        boolean userScoped = InteractiveInputGlobalConfig.userScopedNotificationsEnabled();
+        boolean lock = InteractiveInputGlobalConfig.lockToBuildStarterEnabled();
+        String uid = currentUserId();
+        int count = 0;
+        for (Question q : questions.values()) {
+            if (q.getStatus() == QuestionStatus.WAITING
+                    && jobFullName.equals(q.getJobFullName())
+                    && q.getBuildNumber() == buildNumber
+                    && isNotification(q, uid, userScoped, lock)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
      * @return {@code true} if the build has a WAITING question the current user should be notified of
      *     (drives the build-history badge, honouring user-scope and lock).
      */

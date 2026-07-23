@@ -41,6 +41,7 @@ public class InteractiveInputGlobalConfig extends GlobalConfiguration {
 
     private boolean userScopedNotifications;
     private boolean lockToBuildStarter;
+    private boolean reopenBuildDialogEveryVisit;
 
     public InteractiveInputGlobalConfig() {
         load();
@@ -118,6 +119,16 @@ public class InteractiveInputGlobalConfig extends GlobalConfiguration {
         save();
     }
 
+    public boolean isReopenBuildDialogEveryVisit() {
+        return reopenBuildDialogEveryVisit;
+    }
+
+    @DataBoundSetter
+    public void setReopenBuildDialogEveryVisit(boolean reopenBuildDialogEveryVisit) {
+        this.reopenBuildDialogEveryVisit = reopenBuildDialogEveryVisit;
+        save();
+    }
+
     @Override
     public boolean configure(StaplerRequest2 req, JSONObject json) throws FormException {
         // Feature flags are booleans and Stapler omits unchecked checkboxes, so start them all-off and
@@ -128,6 +139,7 @@ public class InteractiveInputGlobalConfig extends GlobalConfiguration {
         this.features = allFeaturesOff();
         this.userScopedNotifications = false;
         this.lockToBuildStarter = false;
+        this.reopenBuildDialogEveryVisit = false;
         req.bindJSON(this, json);
         save();
         return true;
@@ -177,5 +189,16 @@ public class InteractiveInputGlobalConfig extends GlobalConfiguration {
     public static boolean lockToBuildStarterEnabled() {
         InteractiveInputGlobalConfig c = get();
         return c != null && c.isLockToBuildStarter();
+    }
+
+    /**
+     * @return whether the build-page auto-open dialog should re-open on <em>every</em> visit (mode B).
+     *     Off by default, which selects the gentler mode A (open once per browser session per build,
+     *     dismissible). Controls {@code bell.js} auto-popup behaviour; only ever takes effect when the
+     *     rich modal is enabled and a build is actually waiting for input.
+     */
+    public static boolean reopenBuildDialogEveryVisitEnabled() {
+        InteractiveInputGlobalConfig c = get();
+        return c != null && c.isReopenBuildDialogEveryVisit();
     }
 }

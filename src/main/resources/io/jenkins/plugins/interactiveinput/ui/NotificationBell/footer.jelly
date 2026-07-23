@@ -24,4 +24,32 @@
       <span class="ii-icon-template" style="display:none"><l:icon src="${it.iconClassName}"/></span>
     </div>
   </j:if>
+
+  <!--
+    Run-scoped controllers. summary.jelly only renders on the build's MAIN page, so these live here (on
+    every page via the decorator) instead: the sidebar count badge must stay live on every run sub-page
+    that shows the "Interactive Input" side link (main, console, audit), and the auto-open dialog must
+    fire on the Console Output page — a core view we cannot edit. Both are gated on runContextActive; the
+    auto-open is further scoped to the console page only.
+  -->
+  <j:if test="${it.runContextActive}">
+    <span class="ii-tasklink-controller"
+          style="display:none"
+          data-ii-tasklink="build"
+          data-root-url="${rootURL}"
+          data-job="${it.currentRunJobFullName}"
+          data-build="${it.currentRunBuildNumber}"
+          data-poll-seconds="${it.pollingIntervalSeconds}"
+          data-initial-count="${it.currentRunPendingCount}"/>
+    <j:if test="${it.consolePage}">
+      <span class="ii-autopopup-controller"
+            style="display:none"
+            data-ii-autopopup="build"
+            data-root-url="${rootURL}"
+            data-job="${it.currentRunJobFullName}"
+            data-build="${it.currentRunBuildNumber}"
+            data-rich-modal="${it.richModalEnabled}"
+            data-every="${it.reopenBuildDialogEveryVisit}"/>
+    </j:if>
+  </j:if>
 </j:jelly>

@@ -44,5 +44,20 @@
         and submitter checks — it never grants access. Off by default.
       </f:description>
     </f:entry>
+
+    <!-- B5 (auto-open): when a build page is opened while that build is waiting for interactive input,
+         bell.js pops the answer dialog automatically. This toggle only chooses HOW OFTEN it re-opens;
+         the auto-open itself is on whenever the rich modal is enabled. -->
+    <f:entry>
+      <f:checkbox field="reopenBuildDialogEveryVisit"
+                  title="Re-open the interactive-input dialog on every build-page visit"/>
+      <f:description>
+        On a build page that is waiting for interactive input, the answer dialog opens automatically.
+        [Off (default): it opens once per browser session for that build and can be dismissed — it will
+        not pop again until you open the build in a new session. On: it re-opens on every page load or
+        refresh until the input is answered.] Only applies while the rich modal is enabled; with the
+        modal off the plugin uses the native input page and never auto-opens.
+      </f:description>
+    </f:entry>
   </f:section>
 </j:jelly>

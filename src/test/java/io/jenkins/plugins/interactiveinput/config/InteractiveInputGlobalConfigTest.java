@@ -78,4 +78,29 @@ class InteractiveInputGlobalConfigTest {
         assertFalse(InteractiveInputGlobalConfig.userScopedNotificationsEnabled());
         assertFalse(InteractiveInputGlobalConfig.lockToBuildStarterEnabled());
     }
+
+    @Test
+    void reopenBuildDialogEveryVisitDefaultsOffAndRoundTripsThroughTheUi(JenkinsRule j) throws Exception {
+        // B5 auto-open: off by default selects mode A (open once per browser session); enabling it
+        // selects mode B (re-open on every visit). Must round-trip through the System form like the
+        // other System switches, since configure() rebinds all checkboxes from scratch.
+        InteractiveInputGlobalConfig cfg = InteractiveInputGlobalConfig.get();
+        assertNotNull(cfg);
+        assertFalse(cfg.isReopenBuildDialogEveryVisit(), "every-visit auto-open (mode B) is off by default");
+        assertFalse(InteractiveInputGlobalConfig.reopenBuildDialogEveryVisitEnabled());
+
+        HtmlForm form = j.createWebClient().goTo("configure").getFormByName("config");
+        form.getInputByName("_.reopenBuildDialogEveryVisit").setChecked(true);
+        j.submit(form);
+        assertTrue(
+                InteractiveInputGlobalConfig.reopenBuildDialogEveryVisitEnabled(),
+                "the auto-open every-visit toggle must enable via the System UI");
+
+        HtmlForm form2 = j.createWebClient().goTo("configure").getFormByName("config");
+        form2.getInputByName("_.reopenBuildDialogEveryVisit").setChecked(false);
+        j.submit(form2);
+        assertFalse(
+                InteractiveInputGlobalConfig.reopenBuildDialogEveryVisitEnabled(),
+                "unchecking must turn it back off (configure() starts it off before binding)");
+    }
 }

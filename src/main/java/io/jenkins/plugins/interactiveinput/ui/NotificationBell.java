@@ -3,6 +3,7 @@ package io.jenkins.plugins.interactiveinput.ui;
 import hudson.Extension;
 import hudson.model.Job;
 import hudson.model.PageDecorator;
+import hudson.model.Run;
 import io.jenkins.plugins.interactiveinput.config.InteractiveInputAppearanceConfig;
 import io.jenkins.plugins.interactiveinput.config.InteractiveInputGlobalConfig;
 import io.jenkins.plugins.interactiveinput.store.QuestionStore;
@@ -80,6 +81,102 @@ public class NotificationBell extends PageDecorator {
             LOGGER.log(Level.FINE, "could not compute initial bell count", e);
             return 0;
         }
+    }
+
+    // ---- Run-scoped surfaces (footer.jelly) --------------------------------------------------
+    // Two run-page surfaces cannot live in the classic run summary (summary.jelly renders ONLY on the
+    // build's main page): the sidebar pending-count badge must stay live on every run sub-page (main,
+    // console, audit) that shows the "Interactive Input" side link, and the auto-open dialog must fire
+    // on the Console Output page — a core view we cannot edit. Emitting their tiny controllers from
+    // this global PageDecorator (which already loads bell.js everywhere) is the only injection point
+    // present on all of those pages. The block is gated on runContextActive so nothing renders off a
+    // build page.
+
+    /** @return the {@link Run} the current request is under, or {@code null} off a build page. */
+    private Run<?, ?> currentRun() {
+        StaplerRequest2 req = Stapler.getCurrentRequest2();
+        return req != null ? req.findAncestorObject(Run.class) : null;
+    }
+
+    /**
+     * @return {@code true} when the run-scoped controllers should render: the per-project centre is on
+     *     (so the run's "Interactive Input" side link exists), the page is under a build, and that
+     *     build has at least one interactive-input question. Mirrors the run-action attach condition.
+     */
+    public boolean isRunContextActive() {
+        if (!InteractiveInputAppearanceConfig.perProjectCentreEnabled()) {
+            return false;
+        }
+        Run<?, ?> run = currentRun();
+        if (run == null) {
+            return false;
+        }
+        try {
+            return QuestionStore.get().hasAnyForBuild(run.getParent().getFullName(), run.getNumber());
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.FINE, "could not evaluate run context for interactive-input surfaces", e);
+            return false;
+        }
+    }
+
+    /** @return the full name of the job owning the current build, or an empty string off a build page. */
+    public String getCurrentRunJobFullName() {
+        Run<?, ?> run = currentRun();
+        return run != null ? run.getParent().getFullName() : "";
+    }
+
+    /** @return the current build number, or {@code 0} off a build page. */
+    public int getCurrentRunBuildNumber() {
+        Run<?, ?> run = currentRun();
+        return run != null ? run.getNumber() : 0;
+    }
+
+    /** @return the pending (WAITING) count scoped to the current build for the sidebar badge's initial render. */
+    public int getCurrentRunPendingCount() {
+        Run<?, ?> run = currentRun();
+        if (run == null) {
+            return 0;
+        }
+        try {
+            return QuestionStore.get().countNotificationsForBuild(run.getParent().getFullName(), run.getNumber());
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.FINE, "could not compute run-page pending count", e);
+            return 0;
+        }
+    }
+
+    /**
+     * @return {@code true} when the current request is a build's HTML Console Output page
+     *     ({@code …/console} or {@code …/consoleFull}). Used to scope the auto-open dialog to the
+     *     console page only (the raw {@code …/consoleText} endpoint returns plain text with no page
+     *     decoration, so it never reaches this decorator).
+     */
+    public boolean isConsolePage() {
+        if (currentRun() == null) {
+            return false;
+        }
+        StaplerRequest2 req = Stapler.getCurrentRequest2();
+        if (req == null) {
+            return false;
+        }
+        String uri = req.getRequestURI();
+        if (uri == null) {
+            return false;
+        }
+        int q = uri.indexOf('?');
+        if (q >= 0) {
+            uri = uri.substring(0, q);
+        }
+        uri = uri.replaceAll("/+$", "");
+        return uri.endsWith("/console") || uri.endsWith("/consoleFull");
+    }
+
+    /**
+     * @return whether the auto-open dialog re-opens on every console visit (mode B) rather than once
+     *     per browser session (mode A, the default). Read by the client from the auto-open controller.
+     */
+    public boolean isReopenBuildDialogEveryVisit() {
+        return InteractiveInputGlobalConfig.reopenBuildDialogEveryVisitEnabled();
     }
 
     public int getPollingIntervalSeconds() {

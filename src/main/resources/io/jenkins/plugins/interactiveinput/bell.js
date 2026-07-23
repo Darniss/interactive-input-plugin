@@ -30,6 +30,8 @@
   let widgetMounts = [];
   let auditMounts = [];
   let taskLinkMounts = [];
+  let runBoxMounts = [];
+  let autoPopupMounts = [];
   // No early return when there are no mounts: build-history badges ([data-ii-badge]) are injected
   // lazily by the async build-history widget, so they may not exist yet at load. A delegated click
   // handler (wired at the bottom) covers them; the polling mounts are still set up conditionally.
@@ -1448,8 +1450,12 @@
     if (!job) {
       return;
     }
+    // Build scope (data-build present, emitted on run sub-pages by the page decorator) targets the run's
+    // side link (…/<n>/interactive-input) and counts only that build's WAITING questions; job scope
+    // (jobMain.jelly) targets the job link and uses the server-provided job count.
+    const build = attr(mount, "data-build", "");
     const jobUrl = rootUrl + "/job/" + job.split("/").join("/job/") + "/";
-    const expectedHref = jobUrl + "interactive-input/";
+    const expectedHref = build ? jobUrl + build + "/interactive-input/" : jobUrl + "interactive-input/";
     const url = apiBase + "/questions?job=" + encodeURIComponent(job);
 
     // Compare hrefs by path only, ignoring the origin and any trailing slash. Core renders this link
@@ -1551,7 +1557,13 @@
         taskRow(link).classList.remove("jenkins-hidden");
       } else if (link) {
         setBadge(link, 0);
-        taskRow(link).classList.add("jenkins-hidden");
+        // Job scope is a pending-count notification link, so it hides at zero. Build scope is the
+        // per-build AUDIT link — server-rendered whenever the build EVER had interactive input (any
+        // status) — and must stay visible after the question settles so operators can still review past
+        // inputs. Only drop its badge; never hide the row.
+        if (!build) {
+          taskRow(link).classList.add("jenkins-hidden");
+        }
       }
     }
 
@@ -1560,7 +1572,12 @@
     function refresh() {
       return fetchJson(url)
         .then(function (r) {
-          if (r.ok && r.body && typeof r.body.count === "number") {
+          if (!r.ok || !r.body) {
+            return;
+          }
+          if (build) {
+            apply(waitingForBuild(r.body, build).length);
+          } else if (typeof r.body.count === "number") {
             apply(r.body.count);
           }
         })
@@ -1713,6 +1730,134 @@
     openConsoleLink(link);
   });
 
+  // ====================== run-page attention box + auto-open (B5) ======================
+  // Both surfaces live in the build's summary.jelly and use the JOB-scoped notification list
+  // (?job=<fullName>) filtered to this build, NOT the per-build audit list (?job=&build=). The
+  // job-scoped list is the set of WAITING questions the viewer should act on (honouring the
+  // user-scoped-notifications switch), so the box/auto-open match the build-history badge rather than
+  // raw readability.
+  function waitingForBuild(body, build) {
+    const qs = body && Array.isArray(body.questions) ? body.questions : [];
+    return qs.filter(function (q) {
+      return q.status === "WAITING" && String(q.buildNumber) === String(build);
+    });
+  }
+
+  // The attention indicator: a native summary row (summary.jelly), gated by the per-pipeline "alert
+  // user on run page" property. It starts hidden unless the build is already waiting (server-rendered
+  // jenkins-hidden) and is revealed/hidden live here as this build's waiting count changes — the same
+  // no-reload behaviour as the inline job-page box. Clicking it opens the waiting question(s).
+  function mountRunBox(mount) {
+    const job = attr(mount, "data-job", "");
+    const build = attr(mount, "data-build", "");
+    if (!job || !build) {
+      return;
+    }
+    const richModal = attr(mount, "data-rich-modal", "true") === "true";
+    const url = apiBase + "/questions?job=" + encodeURIComponent(job);
+    const row = mount.closest ? mount.closest(".ii-runbox-row") : null;
+
+    function reveal(waiting) {
+      if (row) {
+        row.classList.toggle("jenkins-hidden", waiting.length === 0);
+      }
+    }
+
+    mount.addEventListener("click", function (e) {
+      // The href (the per-build audit page) is a no-JS fallback; with JS we open in place instead.
+      e.preventDefault();
+      fetchJson(url)
+        .then(function (r) {
+          const waiting = r.ok ? waitingForBuild(r.body, build) : [];
+          reveal(waiting);
+          if (waiting.length > 1) {
+            openSeries(waiting, { richModal: richModal, onDone: refresh });
+          } else if (waiting.length === 1) {
+            openQuestion(waiting[0], { richModal: richModal, onDone: refresh });
+          }
+        })
+        .catch(noop);
+    });
+
+    function refresh() {
+      return fetchJson(url)
+        .then(function (r) {
+          if (r.ok && r.body) {
+            reveal(waitingForBuild(r.body, build));
+          }
+        })
+        .catch(noop);
+    }
+
+    document.addEventListener("ii:answered", function () {
+      refresh();
+    });
+    refresh().then(function () {
+      scheduleLoop(refresh);
+    });
+  }
+
+  // Auto-open the answer dialog on a build's Console Output page when that build is waiting for input
+  // (the [data-ii-autopopup] controller is emitted only on the console page by the page decorator).
+  // Modes are chosen by the System setting carried in data-every:
+  //   * "false" (default, mode A): open ONCE per browser session per build (dismissible). A
+  //     sessionStorage marker stops it re-opening on later refreshes in the same session.
+  //   * "true"  (mode B): open on EVERY page load / refresh until it is answered.
+  // Guards (all necessary): only when the rich modal is enabled — otherwise openQuestion would NAVIGATE
+  // to the native input page, which must never happen automatically on load; never when a ?open=
+  // deep-link is already handling an open, or a dialog is already open.
+  function autoPopupKey(job, build) {
+    return "ii-autopopup:" + job + "#" + build;
+  }
+
+  function alreadyPoppedThisSession(job, build) {
+    try {
+      return !!window.sessionStorage && sessionStorage.getItem(autoPopupKey(job, build)) === "1";
+    } catch (e) {
+      return false; // sessionStorage blocked (privacy mode / sandbox) — treat as not-yet-popped
+    }
+  }
+
+  function markPoppedThisSession(job, build) {
+    try {
+      if (window.sessionStorage) {
+        sessionStorage.setItem(autoPopupKey(job, build), "1");
+      }
+    } catch (e) {
+      /* a missing marker only means mode A may re-pop next load — never a crash */
+    }
+  }
+
+  function maybeAutoPopup(mount) {
+    const job = attr(mount, "data-job", "");
+    const build = attr(mount, "data-build", "");
+    const richModal = attr(mount, "data-rich-modal", "true") === "true";
+    const everyVisit = attr(mount, "data-every", "false") === "true";
+    if (!job || !build || !richModal) {
+      return; // never auto-navigate to /input/ when the rich modal is off
+    }
+    if (getQueryParam("open") || activeModal) {
+      return; // a deep-link or an already-open dialog takes precedence
+    }
+    if (!everyVisit && alreadyPoppedThisSession(job, build)) {
+      return; // mode A: already shown once this session for this build
+    }
+    fetchJson(apiBase + "/questions?job=" + encodeURIComponent(job))
+      .then(function (r) {
+        const waiting = r.ok ? waitingForBuild(r.body, build) : [];
+        if (!waiting.length || activeModal) {
+          return;
+        }
+        markPoppedThisSession(job, build);
+        if (waiting.length > 1) {
+          openSeries(waiting, { richModal: richModal });
+        } else {
+          openQuestion(waiting[0], { richModal: richModal });
+        }
+      })
+      .catch(noop);
+  }
+
   // ----- bootstrap -----
   // Discover the mounts + shared config from the DOM, then wire the polling surfaces. Deferred to DOM
   // ready because on a job page this adjunct is emitted in the main panel, BEFORE the footer bell and
@@ -1724,7 +1869,15 @@
     widgetMounts = toArray(document.querySelectorAll("[data-ii-widget]"));
     auditMounts = toArray(document.querySelectorAll("[data-ii-audit]"));
     taskLinkMounts = toArray(document.querySelectorAll("[data-ii-tasklink]"));
-    cfgSrc = bellMount || widgetMounts[0] || auditMounts[0] || taskLinkMounts[0];
+    runBoxMounts = toArray(document.querySelectorAll("[data-ii-runbox]"));
+    autoPopupMounts = toArray(document.querySelectorAll("[data-ii-autopopup]"));
+    cfgSrc =
+      bellMount ||
+      widgetMounts[0] ||
+      auditMounts[0] ||
+      taskLinkMounts[0] ||
+      runBoxMounts[0] ||
+      autoPopupMounts[0];
     rootUrl = (attr(cfgSrc, "data-root-url", "") || "").replace(/\/$/, "");
     apiBase = rootUrl + "/interactive-input/api/v1";
     richModalDefault = attr(cfgSrc, "data-rich-modal", "true") === "true";
@@ -1763,12 +1916,21 @@
 
   function boot() {
     discover();
-    if (bellMount || widgetMounts.length || auditMounts.length || taskLinkMounts.length) {
+    if (
+      bellMount ||
+      widgetMounts.length ||
+      auditMounts.length ||
+      taskLinkMounts.length ||
+      runBoxMounts.length ||
+      autoPopupMounts.length
+    ) {
       if (bellMount) mountBell(bellMount);
       widgetMounts.forEach(mountJobWidget);
       auditMounts.forEach(mountAuditWidget);
       taskLinkMounts.forEach(mountTaskLink);
+      runBoxMounts.forEach(mountRunBox);
       maybeOpenDeepLink();
+      autoPopupMounts.forEach(maybeAutoPopup);
     }
   }
 

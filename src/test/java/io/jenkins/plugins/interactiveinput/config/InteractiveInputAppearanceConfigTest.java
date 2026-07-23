@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import hudson.util.ListBoxModel;
+import org.jenkins.ui.symbol.Symbol;
+import org.jenkins.ui.symbol.SymbolRequest;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -68,10 +70,36 @@ class InteractiveInputAppearanceConfigTest {
         assertEquals(
                 "symbol-chatbubble-ellipses-outline plugin-ionicons-api",
                 InteractiveInputAppearanceConfig.iconClassName("chatbubble-ellipses"));
+        // The two new Ionicons resolve via ionicons-api like the rest.
+        assertEquals(
+                "symbol-hardware-chip-outline plugin-ionicons-api",
+                InteractiveInputAppearanceConfig.iconClassName("hardware-chip"));
+        assertEquals(
+                "symbol-sparkles-outline plugin-ionicons-api",
+                InteractiveInputAppearanceConfig.iconClassName("sparkles"));
+        // Ionicons has no robot glyph, so the robot is a symbol this plugin ships itself: no -outline
+        // suffix and the plugin-interactive-input source rather than plugin-ionicons-api.
+        assertEquals(
+                "symbol-robot plugin-interactive-input",
+                InteractiveInputAppearanceConfig.iconClassName("robot"));
         // Unknown stems fall back to the default so we never emit a class for a missing symbol.
         assertEquals(
                 "symbol-" + InteractiveInputAppearanceConfig.DEFAULT_ICON + "-outline plugin-ionicons-api",
                 InteractiveInputAppearanceConfig.iconClassName("bogus"));
+    }
+
+    @Test
+    void robotSymbolResolvesFromThisPlugin(JenkinsRule j) {
+        // Proves the whole chain for the bundled icon: the "symbol-robot plugin-interactive-input" class
+        // (from iconClassName) actually resolves to src/main/resources/images/symbols/robot.svg. A missing
+        // symbol would resolve to a placeholder that lacks our distinctive path data.
+        String svg = Symbol.get(new SymbolRequest.Builder()
+                .withName("robot")
+                .withPluginName("interactive-input")
+                .build());
+        assertNotNull(svg);
+        assertTrue(svg.contains("<svg"), "robot symbol must resolve to an inlined SVG");
+        assertTrue(svg.contains("M256 176"), "the resolved SVG must be our bundled robot (antenna path), not a placeholder");
     }
 
     @Test

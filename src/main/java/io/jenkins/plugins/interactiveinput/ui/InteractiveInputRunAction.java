@@ -8,6 +8,7 @@ import hudson.model.BuildBadgeAction;
 import hudson.model.Run;
 import io.jenkins.plugins.interactiveinput.config.InteractiveInputAppearanceConfig;
 import io.jenkins.plugins.interactiveinput.config.InteractiveInputGlobalConfig;
+import io.jenkins.plugins.interactiveinput.config.InteractiveInputRunPageAlertJobProperty;
 import io.jenkins.plugins.interactiveinput.store.QuestionStore;
 import java.util.Collection;
 import java.util.Collections;
@@ -85,6 +86,15 @@ public class InteractiveInputRunAction implements BuildBadgeAction {
 
     public boolean isRichModalEnabled() {
         return InteractiveInputGlobalConfig.featuresOrDefault().isRichModal();
+    }
+
+    /**
+     * @return whether this build's job opted in to the run-page attention indicator (B5) via the
+     *     per-pipeline "alert user on run page" property in Configure. Gates the summary row only; the
+     *     auto-open dialog is independent of this and governed by the System setting.
+     */
+    public boolean isRunAlertEnabled() {
+        return InteractiveInputRunPageAlertJobProperty.isEnabledOn(run.getParent());
     }
 
     @Override

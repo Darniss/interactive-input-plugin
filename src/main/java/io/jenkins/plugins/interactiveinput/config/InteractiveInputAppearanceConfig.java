@@ -49,7 +49,11 @@ import org.kohsuke.stapler.StaplerRequest2;
 @Symbol("interactiveInputAppearance")
 public class InteractiveInputAppearanceConfig extends GlobalConfiguration {
 
-    /** Selectable icons (Ionicon stems); the rendered class uses the {@code -outline} variant. */
+    /**
+     * Selectable icon stems. Most are Ionicons (rendered via the {@code -outline} variant from
+     * ionicons-api); {@link #CUSTOM_SYMBOLS} lists the ones this plugin ships itself (Ionicons has no
+     * robot glyph, so {@code robot} is a bundled symbol under {@code src/main/resources/images/symbols}).
+     */
     public static final List<String> ICON_CHOICES = List.of(
             "chatbubble-ellipses",
             "hand-left",
@@ -57,7 +61,17 @@ public class InteractiveInputAppearanceConfig extends GlobalConfiguration {
             "megaphone",
             "hourglass",
             "alert-circle",
-            "notifications");
+            "notifications",
+            "robot",
+            "hardware-chip",
+            "sparkles");
+
+    /**
+     * Icon stems shipped by this plugin (SVGs under {@code src/main/resources/images/symbols/}) rather
+     * than sourced from ionicons-api. These render as {@code symbol-<stem> plugin-interactive-input}
+     * (no {@code -outline} suffix, which is an Ionicons-only convention).
+     */
+    private static final List<String> CUSTOM_SYMBOLS = List.of("robot");
 
     /** Default icon: a megaphone conveying "needs attention / announcement". */
     public static final String DEFAULT_ICON = "megaphone";
@@ -147,13 +161,18 @@ public class InteractiveInputAppearanceConfig extends GlobalConfiguration {
     }
 
     /**
-     * @param iconStem an Ionicon stem (validated against {@link #ICON_CHOICES}; unknown values fall
-     *     back to {@link #DEFAULT_ICON})
-     * @return the {@code symbol-<name>-outline plugin-ionicons-api} class Jenkins renders as an SVG
+     * @param iconStem an icon stem (validated against {@link #ICON_CHOICES}; unknown values fall back to
+     *     {@link #DEFAULT_ICON})
+     * @return the Jenkins symbol class rendered as an SVG: {@code symbol-<name> plugin-interactive-input}
+     *     for plugin-shipped symbols ({@link #CUSTOM_SYMBOLS}), otherwise
+     *     {@code symbol-<name>-outline plugin-ionicons-api}
      */
     @NonNull
     public static String iconClassName(@CheckForNull String iconStem) {
         String stem = iconStem != null && ICON_CHOICES.contains(iconStem) ? iconStem : DEFAULT_ICON;
+        if (CUSTOM_SYMBOLS.contains(stem)) {
+            return "symbol-" + stem + " plugin-interactive-input";
+        }
         return "symbol-" + stem + "-outline plugin-ionicons-api";
     }
 
@@ -201,6 +220,9 @@ public class InteractiveInputAppearanceConfig extends GlobalConfiguration {
         m.add("Hourglass — waiting / pending decision", "hourglass");
         m.add("Alert — attention needed", "alert-circle");
         m.add("Bell — classic notification", "notifications");
+        m.add("Robot — automated agent awaiting input", "robot");
+        m.add("Chip — automation / agent", "hardware-chip");
+        m.add("Sparkles — AI / assistant", "sparkles");
         return m;
     }
 

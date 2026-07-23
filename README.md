@@ -516,7 +516,7 @@ See [`docs/SECURITY.md`](docs/SECURITY.md) for the threat model and how to repor
 | # | Restriction | Why |
 |---|---|---|
 | 1 | Jenkins **2.568.1+**, Java **21** | Built against the 2.568.x BOM; the 2.568 baseline requires Java 21. |
-| 2 | `pipeline-input-step` **≥ 560** | The bridge/modal target the dialog surface added in 560. |
+| 2 | `pipeline-input-step` **≥ 560** | Needed **only for the opt‑in `inputStepBridge`** — it mirrors the native `InputStepExecution` proceed/abort contract. The rich modal's dialog is a Jenkins **core** feature (row 1), not this plugin. |
 | 3 | `askInteractive` runs in **Pipeline** jobs (not Freestyle) | It's a pipeline step; Freestyle has no step model. Freestyle/other jobs can still use the **REST API**. |
 | 4 | Notifications are **polled**, not pushed | No SSE/WebSocket in v0.1 (proxy‑friendly by design). Cadence ≥ 5s. |
 | 5 | Bridge answers **parameter‑less** native inputs in‑modal | Parameterised native inputs deep‑link to the build form (v0.2). |
@@ -530,9 +530,9 @@ See [`docs/SECURITY.md`](docs/SECURITY.md) for the threat model and how to repor
 |---|---|---|
 | Jenkins core | `2.568.1+` | pinned via `bom-2.568.x` |
 | Java | `21` | required by the 2.568 baseline |
-| `pipeline-input-step` | `≥ 560.v56198a_642157` | **hard requirement** (modal + bridge) |
+| `pipeline-input-step` | `≥ 560.v56198a_642157` | **Mandatory** dependency, but functionally used only by the opt‑in `inputStepBridge` (mirrors native `input`); the modal uses core's dialog, not this. |
 | `configuration-as-code` | optional | JCasC is optional at runtime |
-| `commonmark` | `0.24.0` | bundled in the HPI for safe Markdown |
+| `commonmark` | `0.29.0` | supplied by the `markdown-formatter` plugin (not bundled in our HPI) — used for safe Markdown |
 
 Full dependency inventory: [`docs/BILL_OF_MATERIALS.md`](docs/BILL_OF_MATERIALS.md).
 

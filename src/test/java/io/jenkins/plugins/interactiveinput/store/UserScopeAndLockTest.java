@@ -43,6 +43,10 @@ class UserScopeAndLockTest {
             assertTrue(store.hasNotificationForBuild(JOB, 1), "qA is alice's build");
             assertFalse(store.hasNotificationForBuild(JOB, 2), "qB is bob's build — hidden from alice");
             assertTrue(store.hasNotificationForBuild(JOB, 3), "qT is ownerless — shared");
+            // The per-build count (run-page sidebar badge) honours the same user-scope rules.
+            assertEquals(1, store.countNotificationsForBuild(JOB, 1), "alice's own build shows one");
+            assertEquals(0, store.countNotificationsForBuild(JOB, 2), "bob's build is hidden from alice");
+            assertEquals(1, store.countNotificationsForBuild(JOB, 3), "ownerless build is shared");
         });
         as("bob", () -> assertEquals(2, store.countNotifications(), "bob sees his own (qB) plus ownerless qT"));
     }
