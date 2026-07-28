@@ -73,7 +73,17 @@ class QuestionModelTest {
         long created = 1_000_000L;
         long slaMs = 60_000L;
         Question q = new Question(
-                "q1", "prompt", List.of(new Choice("a", "A")), false, slaMs, null, null, "job", 1, "tester", created,
+                "q1",
+                "prompt",
+                List.of(new Choice("a", "A")),
+                false,
+                slaMs,
+                null,
+                null,
+                "job",
+                1,
+                "tester",
+                created,
                 false);
         assertEquals(created + slaMs, q.getExpiresAt());
         assertFalse(q.isExpired(created + slaMs - 1));
@@ -125,7 +135,17 @@ class QuestionModelTest {
 
     private static Question waiting(long slaMs) {
         return new Question(
-                "q1", "prompt", Collections.singletonList(new Choice("a", "A")), false, slaMs, null, null, "job", 1,
-                "tester", 1L, false);
+                "q1",
+                "prompt",
+                Collections.singletonList(new Choice("a", "A")),
+                false,
+                slaMs,
+                null,
+                null,
+                "job",
+                1,
+                "tester",
+                1L,
+                false);
     }
 }

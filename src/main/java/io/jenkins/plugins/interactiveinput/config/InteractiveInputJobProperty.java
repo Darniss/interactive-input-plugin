@@ -70,7 +70,9 @@ public class InteractiveInputJobProperty extends OptionalJobProperty<Job<?, ?>> 
     @DataBoundSetter
     public void setWebhookCredentialsId(@CheckForNull String webhookCredentialsId) {
         this.webhookCredentialsId =
-                webhookCredentialsId == null || webhookCredentialsId.trim().isEmpty() ? null : webhookCredentialsId.trim();
+                webhookCredentialsId == null || webhookCredentialsId.trim().isEmpty()
+                        ? null
+                        : webhookCredentialsId.trim();
     }
 
     @Extension

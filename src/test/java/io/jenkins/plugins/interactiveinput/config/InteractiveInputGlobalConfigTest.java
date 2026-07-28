@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import hudson.util.XStream2;
 import org.htmlunit.html.HtmlCheckBoxInput;
 import org.htmlunit.html.HtmlForm;
 import org.junit.jupiter.api.Test;
@@ -102,5 +103,33 @@ class InteractiveInputGlobalConfigTest {
         assertFalse(
                 InteractiveInputGlobalConfig.reopenBuildDialogEveryVisitEnabled(),
                 "unchecking must turn it back off (configure() starts it off before binding)");
+    }
+
+    @Test
+    void newFlagsDefaultOnWhenAbsentFromAnUpgradedConfigXml(JenkinsRule j) {
+        // Regression (found in live validation on 2.568.1): a controller upgrading from a build that
+        // predates interactiveView/interactiveOutput has a saved <features> block without those elements.
+        // XStream instantiates the object without running field initialisers, so a plain boolean field
+        // would load as false and silently hide the new surfaces. The nullable Boolean fields must
+        // default these on when the element is absent, while still honouring an explicit value.
+        assertNotNull(j.jenkins, "runs with a live Jenkins so XStream2 uses the same converters as load()");
+        XStream2 xs = new XStream2();
+
+        Features upgraded = (Features) xs.fromXML("<io.jenkins.plugins.interactiveinput.config.Features>"
+                + "<askInteractiveStep>true</askInteractiveStep>"
+                + "<richModal>true</richModal>"
+                + "<restApi>true</restApi>"
+                + "<inputStepBridge>true</inputStepBridge>"
+                + "<dashboardTile>false</dashboardTile>"
+                + "</io.jenkins.plugins.interactiveinput.config.Features>");
+        assertTrue(upgraded.isInteractiveView(), "absent interactiveView must default on after an upgrade");
+        assertTrue(upgraded.isInteractiveOutput(), "absent interactiveOutput must default on after an upgrade");
+
+        Features explicitOff = (Features) xs.fromXML("<io.jenkins.plugins.interactiveinput.config.Features>"
+                + "<interactiveView>false</interactiveView>"
+                + "<interactiveOutput>false</interactiveOutput>"
+                + "</io.jenkins.plugins.interactiveinput.config.Features>");
+        assertFalse(explicitOff.isInteractiveView(), "an explicit false must still be honoured");
+        assertFalse(explicitOff.isInteractiveOutput(), "an explicit false must still be honoured");
     }
 }

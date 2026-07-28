@@ -89,8 +89,19 @@ public class Question implements Serializable {
             long createdTs,
             boolean bridged) {
         this(
-                id, prompt, choices, allowFreeText, slaMs, contextMd, submitterFilter, jobFullName,
-                buildNumber, startedBy, createdTs, bridged, null);
+                id,
+                prompt,
+                choices,
+                allowFreeText,
+                slaMs,
+                contextMd,
+                submitterFilter,
+                jobFullName,
+                buildNumber,
+                startedBy,
+                createdTs,
+                bridged,
+                null);
     }
 
     /** Canonical constructor; {@code parameters} carries native {@code input}-style fields (B24). */

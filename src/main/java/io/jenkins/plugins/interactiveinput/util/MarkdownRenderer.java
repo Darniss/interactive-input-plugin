@@ -2,7 +2,15 @@ package io.jenkins.plugins.interactiveinput.util;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import edu.umd.cs.findbugs.annotations.NonNull;
+import java.util.List;
+import java.util.Map;
+import org.commonmark.node.Block;
+import org.commonmark.node.Document;
+import org.commonmark.node.Node;
+import org.commonmark.node.SourceSpan;
+import org.commonmark.parser.IncludeSourceSpans;
 import org.commonmark.parser.Parser;
+import org.commonmark.renderer.html.AttributeProvider;
 import org.commonmark.renderer.html.HtmlRenderer;
 
 /**
@@ -23,6 +31,18 @@ public final class MarkdownRenderer {
             .percentEncodeUrls(true)
             .build();
 
+    // Variant that records block source positions so the Interactive View editor can anchor inline
+    // (per-line) comments to rendered markdown, mapping each rendered block back to its source line.
+    private static final Parser PARSER_WITH_SPANS =
+            Parser.builder().includeSourceSpans(IncludeSourceSpans.BLOCKS).build();
+
+    private static final HtmlRenderer RENDERER_WITH_SPANS = HtmlRenderer.builder()
+            .escapeHtml(true)
+            .sanitizeUrls(true)
+            .percentEncodeUrls(true)
+            .attributeProviderFactory(context -> new SourceLineAttributeProvider())
+            .build();
+
     private MarkdownRenderer() {}
 
     /**
@@ -35,5 +55,47 @@ public final class MarkdownRenderer {
             return "";
         }
         return RENDERER.render(PARSER.parse(markdown));
+    }
+
+    /**
+     * Same safe rendering as {@link #render(String)}, but additionally tags each top-level block element
+     * with {@code data-source-line="<n>"} (1-based line in the markdown source).
+     *
+     * <p>Used only for the Interactive View document body so a reviewer can attach inline comments to a
+     * rendered block and have them map to the same source line as the Source view (and vice-versa).
+     * Escaping and URL sanitisation are identical to {@link #render(String)} — the attribute provider
+     * only adds a numeric line hint, never markup or user text.
+     *
+     * @param markdown raw markdown (may be {@code null})
+     * @return sanitised HTML with source-line anchors; empty string for {@code null}/blank input
+     */
+    @NonNull
+    public static String renderWithSourceLines(@CheckForNull String markdown) {
+        if (markdown == null || markdown.isEmpty()) {
+            return "";
+        }
+        return RENDERER_WITH_SPANS.render(PARSER_WITH_SPANS.parse(markdown));
+    }
+
+    /**
+     * Adds {@code data-source-line} to top-level block elements that carry a source span. Only top-level
+     * blocks are annotated (parent is the {@link Document}) so there is exactly one anchor per visible
+     * block, avoiding nested/duplicate markers (e.g. list items inside a list).
+     */
+    private static final class SourceLineAttributeProvider implements AttributeProvider {
+        @Override
+        public void setAttributes(Node node, String tagName, Map<String, String> attributes) {
+            if (!(node instanceof Block) || node instanceof Document) {
+                return;
+            }
+            if (!(node.getParent() instanceof Document)) {
+                return;
+            }
+            List<SourceSpan> spans = node.getSourceSpans();
+            if (spans.isEmpty()) {
+                return;
+            }
+            attributes.put("data-source-line", String.valueOf(spans.get(0).getLineIndex() + 1));
+        }
     }
 }

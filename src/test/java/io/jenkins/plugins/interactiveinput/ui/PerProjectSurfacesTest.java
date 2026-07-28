@@ -34,8 +34,18 @@ class PerProjectSurfacesTest {
 
         QuestionStore.get()
                 .submit(new Question(
-                        "sq1", "Approve?", List.of(new Choice("yes", "Yes")), false, 0L, null, null, p.getFullName(), 1,
-                        "alice", System.currentTimeMillis(), false));
+                        "sq1",
+                        "Approve?",
+                        List.of(new Choice("yes", "Yes")),
+                        false,
+                        0L,
+                        null,
+                        null,
+                        p.getFullName(),
+                        1,
+                        "alice",
+                        System.currentTimeMillis(),
+                        false));
 
         InteractiveInputJobAction after = p.getAction(InteractiveInputJobAction.class);
         assertEquals(1, after.getPendingCount());
@@ -53,8 +63,18 @@ class PerProjectSurfacesTest {
 
         QuestionStore.get()
                 .submit(new Question(
-                        "rq1", "Approve?", List.of(new Choice("yes", "Yes")), false, 0L, null, null, p.getFullName(),
-                        b.getNumber(), "alice", System.currentTimeMillis(), false));
+                        "rq1",
+                        "Approve?",
+                        List.of(new Choice("yes", "Yes")),
+                        false,
+                        0L,
+                        null,
+                        null,
+                        p.getFullName(),
+                        b.getNumber(),
+                        "alice",
+                        System.currentTimeMillis(),
+                        false));
 
         InteractiveInputRunAction ra = b.getAction(InteractiveInputRunAction.class);
         assertNotNull(ra, "run action attaches once the build has a question");

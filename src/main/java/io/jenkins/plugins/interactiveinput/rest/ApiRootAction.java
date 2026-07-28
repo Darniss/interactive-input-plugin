@@ -3,6 +3,7 @@ package io.jenkins.plugins.interactiveinput.rest;
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.Extension;
+import hudson.Util;
 import hudson.model.BooleanParameterDefinition;
 import hudson.model.ChoiceParameterDefinition;
 import hudson.model.Item;
@@ -21,7 +22,12 @@ import io.jenkins.plugins.interactiveinput.model.Answer;
 import io.jenkins.plugins.interactiveinput.model.Choice;
 import io.jenkins.plugins.interactiveinput.model.Question;
 import io.jenkins.plugins.interactiveinput.store.QuestionStore;
+import io.jenkins.plugins.interactiveinput.ui.InteractiveViewRunAction;
 import io.jenkins.plugins.interactiveinput.util.MarkdownRenderer;
+import io.jenkins.plugins.interactiveinput.view.ReviewComment;
+import io.jenkins.plugins.interactiveinput.view.ReviewDocument;
+import io.jenkins.plugins.interactiveinput.view.ReviewStatus;
+import io.jenkins.plugins.interactiveinput.view.ViewStore;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.util.LinkedHashMap;
@@ -56,6 +62,13 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
  *   POST /interactive-input/api/v1/questions/{id}/abort    -&gt; QuestionEndpoint#doAbort  (Item.BUILD, else 403; 409 if settled)
  *   POST /interactive-input/api/v1/preview                 -&gt; V1#doPreview              (Overall/Read; safe markdown preview)
  *   GET  /interactive-input/api/v1/health                  -&gt; V1#doHealth               (anonymous)
+ *   GET  /interactive-input/api/v1/views                   -&gt; Views#doIndex             (Overall/Read; ?all=true =&gt; Administer)
+ *   GET  /interactive-input/api/v1/views/{id}              -&gt; ViewEndpoint#doIndex      (Item.READ, else 404)
+ *   GET  /interactive-input/api/v1/views/{id}/raw          -&gt; ViewEndpoint#doRaw        (Item.READ, else 404)
+ *   POST /interactive-input/api/v1/views/{id}/comments     -&gt; ViewEndpoint#doComments   (Item.BUILD/submitter, else 403)
+ *   POST /interactive-input/api/v1/views/{id}/edit         -&gt; ViewEndpoint#doEdit       (Item.BUILD/submitter, else 403)
+ *   POST /interactive-input/api/v1/views/{id}/decision     -&gt; ViewEndpoint#doDecision   (Item.BUILD/submitter, else 403)
+ *   POST /interactive-input/api/v1/views/{id}/resolveComment -&gt; ViewEndpoint#doResolveComment (Item.BUILD/submitter)
  * </pre>
  */
 @Extension
@@ -94,6 +107,21 @@ public class ApiRootAction implements UnprotectedRootAction {
     @CheckForNull
     static HttpResponse apiDisabledOrNull() {
         return apiEnabled() ? null : JsonHttpResponse.error(404, "Interactive Input REST API is disabled");
+    }
+
+    /**
+     * Gate for the {@code /views} endpoints: the REST API and the {@code interactiveView} feature must
+     * both be on. Returns a 404 (no-leak) response when either is off, otherwise {@code null}.
+     */
+    @CheckForNull
+    static HttpResponse viewsDisabledOrNull() {
+        HttpResponse apiOff = apiDisabledOrNull();
+        if (apiOff != null) {
+            return apiOff;
+        }
+        return InteractiveInputGlobalConfig.featuresOrDefault().isInteractiveView()
+                ? null
+                : JsonHttpResponse.error(404, "interactiveView is disabled");
     }
 
     @NonNull
@@ -218,6 +246,10 @@ public class ApiRootAction implements UnprotectedRootAction {
 
         public Questions getQuestions() {
             return new Questions();
+        }
+
+        public Views getViews() {
+            return new Views();
         }
 
         /** GET /health — anonymous liveness probe. */
@@ -438,8 +470,421 @@ public class ApiRootAction implements UnprotectedRootAction {
     }
 
     // ==========================================================================================
+    // /api/v1/views
+    // ==========================================================================================
+    public static class Views {
+
+        /**
+         * GET /views — list review documents visible to the caller.
+         *
+         * <p>Scoping mirrors {@code /questions}:
+         * <ul>
+         *   <li>{@code ?job=<fullName>} — OPEN, notify-enabled reviews for one job the caller may read
+         *       (the per-project notification list). Requires {@code Item.READ}; 404 otherwise (no leak).</li>
+         *   <li>{@code ?job=<fullName>&build=<n>} — every readable review (any status) for one build
+         *       (per-build list/audit).</li>
+         *   <li>{@code ?all=true} — every OPEN readable review (requires {@code Overall/Administer}).</li>
+         *   <li>default — every OPEN, notify-enabled review the caller may read, across all jobs.</li>
+         * </ul>
+         */
+        public HttpResponse doIndex(StaplerRequest2 req) {
+            HttpResponse disabled = viewsDisabledOrNull();
+            if (disabled != null) {
+                return disabled;
+            }
+            Jenkins j = Jenkins.get();
+            if (!j.hasPermission(Jenkins.READ)) {
+                return JsonHttpResponse.error(403, "Overall/Read required");
+            }
+            ViewStore store = ViewStore.get();
+            String jobParam = req.getParameter("job");
+            boolean all = "true".equalsIgnoreCase(req.getParameter("all"));
+            List<ReviewDocument> list;
+            if (jobParam != null && !jobParam.isEmpty()) {
+                Job<?, ?> job = j.getItemByFullName(jobParam, Job.class);
+                if (job == null || !job.hasPermission(Item.READ)) {
+                    return JsonHttpResponse.error(404, "No such job: " + jobParam);
+                }
+                String buildParam = req.getParameter("build");
+                if (buildParam != null && !buildParam.isEmpty()) {
+                    int buildNumber;
+                    try {
+                        buildNumber = Integer.parseInt(buildParam.trim());
+                    } catch (NumberFormatException e) {
+                        return JsonHttpResponse.error(400, "build must be an integer");
+                    }
+                    list = store.listForBuild(jobParam, buildNumber);
+                } else {
+                    list = store.listNotificationsForJob(jobParam);
+                }
+            } else if (all) {
+                if (!j.hasPermission(Jenkins.ADMINISTER)) {
+                    return JsonHttpResponse.error(403, "Overall/Administer required for ?all=true");
+                }
+                list = store.listOpenReadable();
+            } else {
+                list = store.listNotifications();
+            }
+            JSONArray arr = new JSONArray();
+            for (ReviewDocument d : list) {
+                arr.add(viewSummaryJson(d));
+            }
+            JSONObject o = new JSONObject();
+            o.put("count", arr.size());
+            o.put("views", arr);
+            return new JsonHttpResponse(200, o);
+        }
+
+        public ViewEndpoint getDynamic(String id) {
+            return new ViewEndpoint(id);
+        }
+    }
+
+    // ==========================================================================================
+    // /api/v1/views/{id}
+    // ==========================================================================================
+    public static class ViewEndpoint {
+
+        /** Bound comment size so a single comment cannot flood the store. */
+        private static final int MAX_COMMENT_CHARS = 10_000;
+
+        /** Bound an edited review copy (chars), matching the step's snapshot cap order of magnitude. */
+        private static final int MAX_EDIT_CHARS = 2 * 1024 * 1024;
+
+        private final String id;
+
+        public ViewEndpoint(String id) {
+            this.id = id;
+        }
+
+        /** GET /views/{id} — detail (metadata + comments + current content). 404 if not readable. */
+        public HttpResponse doIndex() {
+            HttpResponse disabled = viewsDisabledOrNull();
+            if (disabled != null) {
+                return disabled;
+            }
+            ViewStore store = ViewStore.get();
+            ReviewDocument doc = store.get(id);
+            if (doc == null || !store.canView(doc)) {
+                return JsonHttpResponse.error(404, "No such review: " + id);
+            }
+            return new JsonHttpResponse(200, viewJson(doc, true));
+        }
+
+        /** GET /views/{id}/raw?version=n — one content version as JSON {@code {version, content}}. */
+        public HttpResponse doRaw(StaplerRequest2 req) {
+            HttpResponse disabled = viewsDisabledOrNull();
+            if (disabled != null) {
+                return disabled;
+            }
+            ViewStore store = ViewStore.get();
+            ReviewDocument doc = store.get(id);
+            if (doc == null || !store.canView(doc)) {
+                return JsonHttpResponse.error(404, "No such review: " + id);
+            }
+            int version = doc.getCurrentVersion();
+            String v = req.getParameter("version");
+            if (v != null && !v.isEmpty()) {
+                try {
+                    version = Integer.parseInt(v.trim());
+                } catch (NumberFormatException e) {
+                    return JsonHttpResponse.error(400, "version must be an integer");
+                }
+                if (version < 1 || version > doc.getCurrentVersion()) {
+                    return JsonHttpResponse.error(404, "No such version: " + version);
+                }
+            }
+            String content = store.readContent(id, version);
+            if (content == null) {
+                return JsonHttpResponse.error(404, "No such version: " + version);
+            }
+            JSONObject o = new JSONObject();
+            o.put("id", id);
+            o.put("version", version);
+            o.put("content", content);
+            return new JsonHttpResponse(200, o);
+        }
+
+        /** POST /views/{id}/comments — add an inline or general comment. */
+        @RequirePOST
+        public HttpResponse doComments(StaplerRequest2 req) {
+            HttpResponse gate = mutationGate();
+            if (gate != null) {
+                return gate;
+            }
+            ViewStore store = ViewStore.get();
+            ReviewDocument doc = store.get(id);
+            if (doc == null) {
+                return JsonHttpResponse.error(404, "No such review: " + id);
+            }
+            if (!doc.isCommentable()) {
+                return JsonHttpResponse.error(409, "This review is not commentable");
+            }
+            JSONObject body = readViewBody(req);
+            String text = optString(body, "body");
+            if (text == null) {
+                return JsonHttpResponse.error(400, "A comment body is required");
+            }
+            if (text.length() > MAX_COMMENT_CHARS) {
+                return JsonHttpResponse.error(400, "Comment too long (max " + MAX_COMMENT_CHARS + " chars)");
+            }
+            int line = optInt(body, "line", ReviewComment.GENERAL);
+            if (line < 1) {
+                line = ReviewComment.GENERAL;
+            }
+            try {
+                store.addComment(id, line, text, ViewStore.currentUserId());
+            } catch (IllegalStateException e) {
+                return JsonHttpResponse.error(409, e.getMessage());
+            }
+            // Return the FULL document (content + renderedHtml), like doEdit/doDecision. The client
+            // replaces its detail state with this response and re-renders; omitting content blanked the
+            // left pane until a manual refresh (the inline-comment "crash").
+            return new JsonHttpResponse(200, viewJson(doc, true));
+        }
+
+        /** POST /views/{id}/edit — save an edit to the durable review copy as a new version. */
+        @RequirePOST
+        public HttpResponse doEdit(StaplerRequest2 req) {
+            HttpResponse gate = mutationGate();
+            if (gate != null) {
+                return gate;
+            }
+            ViewStore store = ViewStore.get();
+            ReviewDocument doc = store.get(id);
+            if (doc == null) {
+                return JsonHttpResponse.error(404, "No such review: " + id);
+            }
+            if (!doc.isEditable()) {
+                return JsonHttpResponse.error(409, "This review is not editable");
+            }
+            JSONObject body = readViewBody(req);
+            String content = body.optString("content", null);
+            if (content == null) {
+                return JsonHttpResponse.error(400, "content is required");
+            }
+            if (content.length() > MAX_EDIT_CHARS) {
+                return JsonHttpResponse.error(400, "content too large (max " + MAX_EDIT_CHARS + " chars)");
+            }
+            try {
+                store.saveEdit(id, content, ViewStore.currentUserId());
+            } catch (IllegalStateException e) {
+                return JsonHttpResponse.error(409, e.getMessage());
+            }
+            return new JsonHttpResponse(200, viewJson(doc, true));
+        }
+
+        /** POST /views/{id}/decision — record approve / reject / acknowledge (resolves a waiting step). */
+        @RequirePOST
+        public HttpResponse doDecision(StaplerRequest2 req) {
+            HttpResponse gate = mutationGate();
+            if (gate != null) {
+                return gate;
+            }
+            ViewStore store = ViewStore.get();
+            ReviewDocument doc = store.get(id);
+            if (doc == null) {
+                return JsonHttpResponse.error(404, "No such review: " + id);
+            }
+            JSONObject body = readViewBody(req);
+            ReviewStatus target = decisionOf(optString(body, "decision"));
+            if (target == null) {
+                return JsonHttpResponse.error(
+                        400, "decision must be one of approve, reject, acknowledge, request-changes");
+            }
+            try {
+                store.decide(id, target, ViewStore.currentUserId(), QuestionStore.SOURCE_REST);
+            } catch (IllegalStateException e) {
+                return JsonHttpResponse.error(409, e.getMessage());
+            } catch (IllegalArgumentException e) {
+                return JsonHttpResponse.error(400, e.getMessage());
+            }
+            return new JsonHttpResponse(200, viewJson(doc, true));
+        }
+
+        /** POST /views/{id}/resolveComment — toggle a comment's resolved flag. */
+        @RequirePOST
+        public HttpResponse doResolveComment(StaplerRequest2 req) {
+            HttpResponse gate = mutationGate();
+            if (gate != null) {
+                return gate;
+            }
+            ViewStore store = ViewStore.get();
+            ReviewDocument doc = store.get(id);
+            if (doc == null) {
+                return JsonHttpResponse.error(404, "No such review: " + id);
+            }
+            JSONObject body = readViewBody(req);
+            String commentId = optString(body, "commentId");
+            if (commentId == null) {
+                return JsonHttpResponse.error(400, "commentId is required");
+            }
+            boolean resolved = body.optBoolean("resolved", true);
+            try {
+                store.setCommentResolved(id, commentId, resolved);
+            } catch (IllegalStateException e) {
+                return JsonHttpResponse.error(404, e.getMessage());
+            }
+            // Full document (content + renderedHtml) so the left pane survives a resolve toggle — see
+            // doComments above for the rationale.
+            return new JsonHttpResponse(200, viewJson(doc, true));
+        }
+
+        /**
+         * Shared guard for every mutation: API enabled, document readable (404 no-leak) and the caller
+         * may contribute (403). Returns the error response, or {@code null} when the caller may proceed.
+         */
+        @CheckForNull
+        private HttpResponse mutationGate() {
+            HttpResponse disabled = viewsDisabledOrNull();
+            if (disabled != null) {
+                return disabled;
+            }
+            ViewStore store = ViewStore.get();
+            ReviewDocument doc = store.get(id);
+            if (doc == null || !store.canView(doc)) {
+                return JsonHttpResponse.error(404, "No such review: " + id);
+            }
+            if (!store.canContributeEffective(doc)) {
+                return JsonHttpResponse.error(403, "Job/Build permission (or submitter membership) required");
+            }
+            return null;
+        }
+    }
+
+    // ==========================================================================================
     // Helpers
     // ==========================================================================================
+
+    /** Compact review summary for list endpoints (no comments or content). Includes the editor URL. */
+    @NonNull
+    static JSONObject viewSummaryJson(@NonNull ReviewDocument doc) {
+        JSONObject o = doc.toJson(false, System.currentTimeMillis());
+        ViewStore store = ViewStore.get();
+        o.put("canContribute", store.canContributeEffective(doc));
+        String url = editorUrl(doc);
+        if (url != null) {
+            o.put("url", url);
+        }
+        return o;
+    }
+
+    /** Full review detail: metadata, comments (with sanitised {@code bodyHtml}) and current content. */
+    @NonNull
+    static JSONObject viewJson(@NonNull ReviewDocument doc, boolean includeContent) {
+        long now = System.currentTimeMillis();
+        JSONObject o = doc.toJson(false, now);
+        ViewStore store = ViewStore.get();
+        o.put("canView", store.canView(doc));
+        o.put("canContribute", store.canContributeEffective(doc));
+        String url = editorUrl(doc);
+        if (url != null) {
+            o.put("url", url);
+        }
+        JSONArray comments = new JSONArray();
+        for (ReviewComment c : doc.getComments()) {
+            JSONObject cj = c.toJson();
+            // Comment bodies are untrusted markdown; render to sanitised HTML server-side (never stored
+            // as HTML, never inserted raw by the client).
+            cj.put("bodyHtml", MarkdownRenderer.render(c.getBody()));
+            comments.add(cj);
+        }
+        o.put("comments", comments);
+        if (includeContent) {
+            String content = store.readCurrentContent(doc.getId());
+            o.put("content", content == null ? "" : content);
+            // Markdown is rendered to sanitised HTML for display; every other format (HTML/code/text) is
+            // sent as raw text only and shown ESCAPED by the client (never executed). Block elements carry
+            // data-source-line so the client can anchor inline comments on the rendered view too.
+            if (ReviewDocument.FORMAT_MARKDOWN.equals(doc.getFormat())) {
+                o.put("renderedHtml", MarkdownRenderer.renderWithSourceLines(content == null ? "" : content));
+            }
+        }
+        return o;
+    }
+
+    /** The review editor page URL ({@code .../<build>/interactive-view/?doc=<id>}), or {@code null}. */
+    @CheckForNull
+    static String editorUrl(@NonNull ReviewDocument doc) {
+        Jenkins j = Jenkins.getInstanceOrNull();
+        if (j == null) {
+            return null;
+        }
+        Job<?, ?> job = j.getItemByFullName(doc.getJobFullName(), Job.class);
+        if (job == null) {
+            return null;
+        }
+        Run<?, ?> run = job.getBuildByNumber(doc.getBuildNumber());
+        String root = j.getRootUrl();
+        String base = (root != null && !root.isEmpty()) ? root : "/";
+        String scope = run != null ? run.getUrl() : job.getUrl();
+        return base + scope + InteractiveViewRunAction.URL_NAME + "/?doc=" + Util.rawEncode(doc.getId());
+    }
+
+    @NonNull
+    static JSONObject readViewBody(@NonNull StaplerRequest2 req) {
+        JSONObject o = new JSONObject();
+        String ct = req.getContentType();
+        if (ct != null && ct.toLowerCase(Locale.ROOT).contains("application/json")) {
+            try (BufferedReader r = req.getReader()) {
+                if (r != null) {
+                    String body = r.lines().collect(Collectors.joining("\n"));
+                    if (!body.trim().isEmpty()) {
+                        return JSONObject.fromObject(body);
+                    }
+                }
+            } catch (IOException | RuntimeException e) {
+                // Malformed/unavailable JSON body: fall through to form parameters / empty object.
+            }
+            return o;
+        }
+        putIfPresent(o, "body", req.getParameter("body"));
+        putIfPresent(o, "content", req.getParameter("content"));
+        putIfPresent(o, "line", req.getParameter("line"));
+        putIfPresent(o, "decision", req.getParameter("decision"));
+        putIfPresent(o, "commentId", req.getParameter("commentId"));
+        putIfPresent(o, "resolved", req.getParameter("resolved"));
+        return o;
+    }
+
+    /** @return the {@link ReviewStatus} for a decision verb, or {@code null} if unrecognised. */
+    @CheckForNull
+    static ReviewStatus decisionOf(@CheckForNull String decision) {
+        if (decision == null) {
+            return null;
+        }
+        switch (decision.trim().toLowerCase(Locale.ROOT)) {
+            case "approve":
+            case "approved":
+                return ReviewStatus.APPROVED;
+            case "reject":
+            case "rejected":
+                return ReviewStatus.REJECTED;
+            case "acknowledge":
+            case "acknowledged":
+            case "ack":
+                return ReviewStatus.ACKNOWLEDGED;
+            case "changes":
+            case "request-changes":
+            case "request_changes":
+            case "regenerate":
+            case "revise":
+                return ReviewStatus.CHANGES_REQUESTED;
+            default:
+                return null;
+        }
+    }
+
+    private static int optInt(@NonNull JSONObject o, @NonNull String key, int dflt) {
+        if (!o.containsKey(key) || o.get(key) == null) {
+            return dflt;
+        }
+        try {
+            return o.getInt(key);
+        } catch (RuntimeException e) {
+            return dflt;
+        }
+    }
 
     /**
      * Resolve a submitted {@code {parameters:{name:value}}} body into the ordered name&#8594;value map

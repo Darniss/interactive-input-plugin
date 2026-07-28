@@ -79,9 +79,7 @@ class InteractiveInputAppearanceConfigTest {
                 InteractiveInputAppearanceConfig.iconClassName("sparkles"));
         // Ionicons has no robot glyph, so the robot is a symbol this plugin ships itself: no -outline
         // suffix and the plugin-interactive-input source rather than plugin-ionicons-api.
-        assertEquals(
-                "symbol-robot plugin-interactive-input",
-                InteractiveInputAppearanceConfig.iconClassName("robot"));
+        assertEquals("symbol-robot plugin-interactive-input", InteractiveInputAppearanceConfig.iconClassName("robot"));
         // Unknown stems fall back to the default so we never emit a class for a missing symbol.
         assertEquals(
                 "symbol-" + InteractiveInputAppearanceConfig.DEFAULT_ICON + "-outline plugin-ionicons-api",
@@ -99,7 +97,9 @@ class InteractiveInputAppearanceConfigTest {
                 .build());
         assertNotNull(svg);
         assertTrue(svg.contains("<svg"), "robot symbol must resolve to an inlined SVG");
-        assertTrue(svg.contains("M256 176"), "the resolved SVG must be our bundled robot (antenna path), not a placeholder");
+        assertTrue(
+                svg.contains("M256 176"),
+                "the resolved SVG must be our bundled robot (antenna path), not a placeholder");
     }
 
     @Test

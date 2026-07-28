@@ -42,14 +42,22 @@ class JobPageBoxLiveSyncTest {
         assertTrue(
                 empty.contains("data-ii-widget=\"job\""),
                 "the box mount must render even at zero so bell.js can reveal it without a reload");
-        assertTrue(
-                empty.contains("ii-jobcard jenkins-hidden"),
-                "with nothing pending the box card starts hidden");
+        assertTrue(empty.contains("ii-jobcard jenkins-hidden"), "with nothing pending the box card starts hidden");
 
         // A question appears: the same mount is present and the wrapper is no longer hidden.
         store.submit(new Question(
-                "bq1", "Approve?", List.of(new Choice("yes", "Yes")), false, 0L, null, null, JOB, 1, "tester",
-                System.currentTimeMillis(), false));
+                "bq1",
+                "Approve?",
+                List.of(new Choice("yes", "Yes")),
+                false,
+                0L,
+                null,
+                null,
+                JOB,
+                1,
+                "tester",
+                System.currentTimeMillis(),
+                false));
 
         String pending = jobPageHtml(j, p);
         assertTrue(pending.contains("data-ii-widget=\"job\""), "the box mount renders while a question waits");

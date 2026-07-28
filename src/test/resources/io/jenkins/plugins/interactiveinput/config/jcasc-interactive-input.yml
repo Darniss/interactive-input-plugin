@@ -6,6 +6,8 @@ unclassified:
       restApi: true
       inputStepBridge: true
       dashboardTile: false
+      interactiveView: false
+      interactiveOutput: true
     polling:
       intervalSeconds: 30
     sla:

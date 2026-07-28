@@ -47,8 +47,7 @@ class JobPageBellVisibilityTest {
             HtmlPage dashboard = wc.goTo("");
             wc.waitForBackgroundJavaScript(3000);
             assertFalse(
-                    dashboard.querySelectorAll(".ii-bell-btn").isEmpty(),
-                    "control bell must mount on the dashboard");
+                    dashboard.querySelectorAll(".ii-bell-btn").isEmpty(), "control bell must mount on the dashboard");
 
             // Job page: the adjunct is emitted in the main panel, before the footer bell. The bell must
             // STILL mount here — it did not before the DOMContentLoaded fix.

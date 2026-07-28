@@ -37,8 +37,18 @@ class RunPageAttentionBoxTest {
 
     private static Question waiting(String id, String job, int build) {
         return new Question(
-                id, "Approve?", List.of(new Choice("yes", "Yes")), false, 0L, null, null, job, build, "tester",
-                System.currentTimeMillis(), false);
+                id,
+                "Approve?",
+                List.of(new Choice("yes", "Yes")),
+                false,
+                0L,
+                null,
+                null,
+                job,
+                build,
+                "tester",
+                System.currentTimeMillis(),
+                false);
     }
 
     @Test

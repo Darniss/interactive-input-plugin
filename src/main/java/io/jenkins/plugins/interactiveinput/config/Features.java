@@ -24,6 +24,16 @@ public class Features extends AbstractDescribableImpl<Features> {
     private boolean inputStepBridge = false;
     private boolean dashboardTile = false;
 
+    // interactiveView/interactiveOutput were added after the plugin's first release. Controllers that
+    // upgrade already have a saved config whose <features> block predates these two flags. XStream
+    // instantiates this class without running field initialisers, so a plain "boolean = true" field would
+    // load as false for any absent element and silently hide the new surfaces on upgrade — the opposite
+    // of the intended "default on". Using a nullable Boolean lets "absent in the persisted XML" (null)
+    // mean default-on via the getters, while an explicit true/false from the System form or JCasC is
+    // honoured. Fresh construction still defaults on through these initialisers.
+    private Boolean interactiveView = Boolean.TRUE;
+    private Boolean interactiveOutput = Boolean.TRUE;
+
     @DataBoundConstructor
     public Features() {
         // Defaults set via field initialisers; JCasC/Stapler apply overrides through setters.
@@ -72,6 +82,32 @@ public class Features extends AbstractDescribableImpl<Features> {
     @DataBoundSetter
     public void setDashboardTile(boolean dashboardTile) {
         this.dashboardTile = dashboardTile;
+    }
+
+    /**
+     * @return whether the {@code interactiveView} review surfaces (page, sidebar, bell, REST) show.
+     *     A {@code null} field (upgrade from a config saved before this flag existed) defaults on.
+     */
+    public boolean isInteractiveView() {
+        return interactiveView == null || interactiveView;
+    }
+
+    @DataBoundSetter
+    public void setInteractiveView(boolean interactiveView) {
+        this.interactiveView = interactiveView;
+    }
+
+    /**
+     * @return whether the {@code interactiveOutput} statistics surfaces (build/job pages) show.
+     *     A {@code null} field (upgrade from a config saved before this flag existed) defaults on.
+     */
+    public boolean isInteractiveOutput() {
+        return interactiveOutput == null || interactiveOutput;
+    }
+
+    @DataBoundSetter
+    public void setInteractiveOutput(boolean interactiveOutput) {
+        this.interactiveOutput = interactiveOutput;
     }
 
     @Extension

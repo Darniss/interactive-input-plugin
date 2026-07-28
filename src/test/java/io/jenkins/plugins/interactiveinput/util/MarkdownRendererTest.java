@@ -43,4 +43,25 @@ class MarkdownRendererTest {
         String html = MarkdownRenderer.render("[docs](https://www.jenkins.io/)");
         assertTrue(html.contains("href=\"https://www.jenkins.io/\""), html);
     }
+
+    @Test
+    void renderWithSourceLinesTagsTopLevelBlocksWithTheirSourceLine() {
+        // Line 1 = heading, line 2 = blank, line 3 = paragraph.
+        String html = MarkdownRenderer.renderWithSourceLines("# Heading\n\nA paragraph.");
+        assertTrue(html.contains("data-source-line=\"1\""), "heading anchors to line 1: " + html);
+        assertTrue(html.contains("data-source-line=\"3\""), "paragraph anchors to line 3: " + html);
+    }
+
+    @Test
+    void renderWithSourceLinesKeepsTheSameSanitisation() {
+        String html = MarkdownRenderer.renderWithSourceLines("<script>alert(1)</script>\n\n[l](javascript:alert(1))");
+        assertFalse(html.contains("<script>"), "raw <script> must be escaped: " + html);
+        assertFalse(html.contains("javascript:"), "javascript: scheme must be sanitised: " + html);
+    }
+
+    @Test
+    void renderWithSourceLinesHandlesNullAndBlank() {
+        assertEquals("", MarkdownRenderer.renderWithSourceLines(null));
+        assertEquals("", MarkdownRenderer.renderWithSourceLines(""));
+    }
 }

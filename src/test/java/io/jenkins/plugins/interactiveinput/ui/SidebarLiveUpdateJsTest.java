@@ -43,8 +43,18 @@ class SidebarLiveUpdateJsTest {
         FreeStyleProject p = j.createFreeStyleProject(JOB); // per-project centre is on by default
         QuestionStore store = QuestionStore.get();
         store.submit(new Question(
-                "n1", "Approve?", List.of(new Choice("yes", "Yes")), false, 0L, null, null, JOB, 1, null,
-                System.currentTimeMillis(), false));
+                "n1",
+                "Approve?",
+                List.of(new Choice("yes", "Yes")),
+                false,
+                0L,
+                null,
+                null,
+                JOB,
+                1,
+                null,
+                System.currentTimeMillis(),
+                false));
 
         try (JenkinsRule.WebClient wc = j.createWebClient()) {
             wc.getOptions().setJavaScriptEnabled(true);

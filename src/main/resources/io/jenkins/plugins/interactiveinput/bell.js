@@ -296,6 +296,21 @@
     return link;
   }
 
+  // A dropdown row for an interactiveView review. Unlike questions (which open a dialog in place),
+  // clicking a review NAVIGATES to its editor page (v.url), satisfying "route it to a new page".
+  function viewListItem(v, onClick) {
+    const link = el("button", { cls: "ii-item", attrs: { type: "button", role: "menuitem" } });
+    link.appendChild(el("span", { cls: "ii-item-prompt", text: v.title || v.reportName || "Review" }));
+    const meta = el("span", { cls: "ii-item-ref" });
+    meta.appendChild(statusPill(v.status));
+    meta.appendChild(el("span", { text: " " + v.jobFullName + " #" + v.buildNumber }));
+    link.appendChild(meta);
+    const c = v.commentCount || 0;
+    link.appendChild(el("span", { cls: "ii-item-by", text: c + " comment" + (c === 1 ? "" : "s") }));
+    link.addEventListener("click", onClick);
+    return link;
+  }
+
   // ================================ shared modal ================================
   let activeModal = null;
   let lastFocused = null;
@@ -1230,7 +1245,10 @@
     tabBadgeEnabled = attr(mount, "data-tab-badge", "true") === "true";
     // Dashboard => every answerable question; inside a pipeline => only that pipeline's questions.
     const listUrl = job ? apiBase + "/questions?job=" + encodeURIComponent(job) : apiBase + "/questions";
+    // Parallel interactiveView reviews list (additive; empty/ignored when the feature or API is off).
+    const viewsUrl = job ? apiBase + "/views?job=" + encodeURIComponent(job) : apiBase + "/views";
     const headerText = job ? "Pending for this pipeline" : "Pending questions";
+    const viewsHeaderText = job ? "Reviews for this pipeline" : "Reviews";
 
     const bellBtn = el("button", {
       cls: "ii-bell-btn",
@@ -1260,6 +1278,7 @@
     if (mount.parentNode) mount.parentNode.removeChild(mount);
 
     let questionsCache = [];
+    let viewsCache = [];
 
     function setCount(n) {
       if (n > 0) {
@@ -1290,34 +1309,72 @@
 
     function renderDropdown() {
       dropdown.innerHTML = "";
-      dropdown.appendChild(el("div", { cls: "ii-dropdown-header", text: headerText }));
-      if (!questionsCache.length) {
+      const hasQ = questionsCache.length > 0;
+      const hasV = viewsCache.length > 0;
+      if (!hasQ && !hasV) {
+        dropdown.appendChild(el("div", { cls: "ii-dropdown-header", text: headerText }));
         dropdown.appendChild(el("div", { cls: "ii-empty", text: "Nothing waiting for you right now." }));
         return;
       }
-      const list = el("ul", { cls: "ii-list", attrs: { role: "none" } });
-      questionsCache.slice(0, 10).forEach(function (q) {
-        const item = el("li", { attrs: { role: "none" } });
-        item.appendChild(
-          questionListItem(q, function () {
-            toggleDropdown(false);
-            openQuestion(q, { richModal: richModal, onDone: refresh });
-          })
-        );
-        list.appendChild(item);
-      });
-      dropdown.appendChild(list);
+      if (hasQ) {
+        dropdown.appendChild(el("div", { cls: "ii-dropdown-header", text: headerText }));
+        const list = el("ul", { cls: "ii-list", attrs: { role: "none" } });
+        questionsCache.slice(0, 10).forEach(function (q) {
+          const item = el("li", { attrs: { role: "none" } });
+          item.appendChild(
+            questionListItem(q, function () {
+              toggleDropdown(false);
+              openQuestion(q, { richModal: richModal, onDone: refresh });
+            })
+          );
+          list.appendChild(item);
+        });
+        dropdown.appendChild(list);
+      }
+      if (hasV) {
+        dropdown.appendChild(el("div", { cls: "ii-dropdown-header", text: viewsHeaderText }));
+        const vlist = el("ul", { cls: "ii-list", attrs: { role: "none" } });
+        viewsCache.slice(0, 10).forEach(function (v) {
+          const item = el("li", { attrs: { role: "none" } });
+          item.appendChild(
+            viewListItem(v, function () {
+              toggleDropdown(false);
+              if (v.url) {
+                window.location.assign(v.url);
+              }
+            })
+          );
+          vlist.appendChild(item);
+        });
+        dropdown.appendChild(vlist);
+      }
     }
 
     function refresh() {
-      return fetchJson(listUrl)
-        .then(function (r) {
-          if (r.ok && r.body && Array.isArray(r.body.questions)) {
-            questionsCache = r.body.questions;
-            setCount(r.body.count != null ? r.body.count : questionsCache.length);
-            if (!dropdown.hasAttribute("hidden")) {
-              renderDropdown();
-            }
+      // Fetch questions and reviews together; the badge sums both. Each fetch is isolated so a
+      // disabled/absent reviews API (feature off) never affects the questions list, and vice versa.
+      return Promise.all([
+        fetchJson(listUrl).catch(function () {
+          return { ok: false };
+        }),
+        fetchJson(viewsUrl).catch(function () {
+          return { ok: false };
+        }),
+      ])
+        .then(function (results) {
+          const rq = results[0];
+          const rv = results[1];
+          let qCount = questionsCache.length;
+          if (rq.ok && rq.body && Array.isArray(rq.body.questions)) {
+            questionsCache = rq.body.questions;
+            qCount = rq.body.count != null ? rq.body.count : questionsCache.length;
+          }
+          if (rv.ok && rv.body && Array.isArray(rv.body.views)) {
+            viewsCache = rv.body.views;
+          }
+          setCount((qCount || 0) + viewsCache.length);
+          if (!dropdown.hasAttribute("hidden")) {
+            renderDropdown();
           }
         })
         .catch(noop);
@@ -1440,23 +1497,34 @@
   }
 
   // ============================ live sidebar task-link count ============================
-  // Keeps the left-sidebar "Interactive Input" link's pending-count badge live (Point 2). Core
-  // renders that link server-side once per page load, so without this the count only refreshes on
-  // reload. The always-present [data-ii-tasklink] controller (jobMain.jelly) polls the scoped count,
-  // renders it as a native jenkins-badge pill next to the label (not "(N)" text), hides the row at
-  // zero, and best-effort reveals it when a question first appears.
+  // Keeps a left-sidebar link's count badge live (Point 2). Core renders these links server-side once
+  // per page load, so without this the count only refreshes on reload. The always-present
+  // [data-ii-tasklink] controller polls the scoped count, renders it as a native jenkins-badge pill next
+  // to the label (not "(N)" text), hides the row at zero, and best-effort reveals it when the first item
+  // appears. One implementation serves both the "Interactive Input" link (questions; kinds job/build)
+  // and the "Interactive View" link (reviews; kinds view-job/view-build) — see the kind switch below.
   function mountTaskLink(mount) {
     const job = attr(mount, "data-job", "");
     if (!job) {
       return;
     }
+    // The same controller drives two sidebar links: "Interactive Input" (questions, kinds job/build) and
+    // "Interactive View" (reviews, kinds view-job/view-build). Only the link segment, label, endpoint and
+    // count extraction differ; the inject/find/badge machinery is shared. The questions path is unchanged.
+    const kind = attr(mount, "data-ii-tasklink", "job");
+    const isView = kind.indexOf("view") === 0; // "view-job" | "view-build"
+    const linkSeg = isView ? "interactive-view" : "interactive-input";
+    const LABEL = isView ? "Interactive View" : "Interactive Input";
     // Build scope (data-build present, emitted on run sub-pages by the page decorator) targets the run's
-    // side link (…/<n>/interactive-input) and counts only that build's WAITING questions; job scope
-    // (jobMain.jelly) targets the job link and uses the server-provided job count.
+    // side link (…/<n>/<seg>); job scope (jobMain.jelly) targets the job link and uses the server count.
     const build = attr(mount, "data-build", "");
     const jobUrl = rootUrl + "/job/" + job.split("/").join("/job/") + "/";
-    const expectedHref = build ? jobUrl + build + "/interactive-input/" : jobUrl + "interactive-input/";
-    const url = apiBase + "/questions?job=" + encodeURIComponent(job);
+    const expectedHref = build ? jobUrl + build + "/" + linkSeg + "/" : jobUrl + linkSeg + "/";
+    // Both links poll the job-scoped notification endpoint (server already applies the notify flag and
+    // the "own build's notifications" user-scope). Build scope then filters that same list to the current
+    // build client-side, so the per-build badge matches the bell and the setting instead of counting
+    // every reader's reviews. (Questions have always been job-only + client-filtered by build.)
+    let url = apiBase + (isView ? "/views" : "/questions") + "?job=" + encodeURIComponent(job);
 
     // Compare hrefs by path only, ignoring the origin and any trailing slash. Core renders this link
     // WITHOUT a trailing slash (…/interactive-input) while we build expectedHref WITH one; an exact
@@ -1468,6 +1536,9 @@
     const expectedPath = normPath(expectedHref);
 
     function findLink() {
+      // Classic layout only: the server-rendered link in the #tasks sidebar. In the experimental layout the
+      // sidebar is gone and reachability is provided by core's native "more actions" overflow menu (the
+      // JobAction/RunAction exposes an icon + display name), so there is no fallback link for us to badge.
       const anchors = document.querySelectorAll("#tasks a[href], #side-panel a[href], .task a[href]");
       for (let i = 0; i < anchors.length; i++) {
         if (normPath(anchors[i].getAttribute("href") || "") === expectedPath) {
@@ -1477,11 +1548,10 @@
       return null;
     }
 
-    function taskRow(link) {
+    // The row to show/hide is the sidebar link's enclosing .task (fallback to its parent).
+    function rowOf(link) {
       return (link.closest && link.closest(".task")) || link.parentNode || link;
     }
-
-    const LABEL = "Interactive Input";
 
     function setLabel(link, text) {
       const span = link.querySelector(".task-link-text");
@@ -1554,15 +1624,15 @@
           setLabel(link, LABEL);
         }
         setBadge(link, n);
-        taskRow(link).classList.remove("jenkins-hidden");
+        rowOf(link).classList.remove("jenkins-hidden");
       } else if (link) {
         setBadge(link, 0);
         // Job scope is a pending-count notification link, so it hides at zero. Build scope is the
         // per-build AUDIT link — server-rendered whenever the build EVER had interactive input (any
         // status) — and must stay visible after the question settles so operators can still review past
-        // inputs. Only drop its badge; never hide the row.
+        // inputs. Only drop its badge.
         if (!build) {
-          taskRow(link).classList.add("jenkins-hidden");
+          rowOf(link).classList.add("jenkins-hidden");
         }
       }
     }
@@ -1575,7 +1645,21 @@
           if (!r.ok || !r.body) {
             return;
           }
-          if (build) {
+          if (isView) {
+            // Job scope: server returns the scoped notification count. Build scope: filter that same
+            // scoped list (already OPEN + notify + user-scope) down to the current build so the badge
+            // matches the bell; the audit link itself stays visible at zero (see apply()).
+            if (build) {
+              const views = Array.isArray(r.body.views) ? r.body.views : [];
+              apply(
+                views.filter(function (v) {
+                  return v && String(v.buildNumber) === String(build);
+                }).length
+              );
+            } else if (typeof r.body.count === "number") {
+              apply(r.body.count);
+            }
+          } else if (build) {
             apply(waitingForBuild(r.body, build).length);
           } else if (typeof r.body.count === "number") {
             apply(r.body.count);

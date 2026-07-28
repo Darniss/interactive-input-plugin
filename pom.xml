@@ -1,14 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
   <parent>
     <groupId>org.jenkins-ci.plugins</groupId>
     <artifactId>plugin</artifactId>
     <version>6.2211.v27f680c93c53</version>
-    <relativePath/>
+    <relativePath />
   </parent>
 
   <groupId>io.jenkins.plugins</groupId>
@@ -32,8 +30,8 @@
   <scm>
     <connection>scm:git:https://github.com/jenkinsci/interactive-input-plugin.git</connection>
     <developerConnection>scm:git:git@github.com:jenkinsci/interactive-input-plugin.git</developerConnection>
-    <url>https://github.com/jenkinsci/interactive-input-plugin</url>
     <tag>${scmTag}</tag>
+    <url>https://github.com/jenkinsci/interactive-input-plugin</url>
   </scm>
 
   <properties>
@@ -75,43 +73,20 @@
   </dependencyManagement>
 
   <dependencies>
-    <!-- Pipeline / workflow (versions managed by BOM unless noted) -->
+
+    <!-- JCasC: optional at runtime (air-gapped masters install without it) -->
     <dependency>
-      <groupId>org.jenkins-ci.plugins.workflow</groupId>
-      <artifactId>workflow-step-api</artifactId>
-    </dependency>
-    <!-- FlowNode + PauseAction for the anchored console link / "Paused" flow-graph marker (§console audit). -->
-    <dependency>
-      <groupId>org.jenkins-ci.plugins.workflow</groupId>
-      <artifactId>workflow-api</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>org.jenkins-ci.plugins.workflow</groupId>
-      <artifactId>workflow-job</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>org.jenkins-ci.plugins.workflow</groupId>
-      <artifactId>workflow-support</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>org.jenkins-ci.plugins.workflow</groupId>
-      <artifactId>workflow-durable-task-step</artifactId>
+      <groupId>io.jenkins</groupId>
+      <artifactId>configuration-as-code</artifactId>
+      <optional>true</optional>
     </dependency>
 
-    <!-- Modal dialog surface + input bridge target. Version managed by the bom chain
-         (bom-2.568.x); the 2.568 baseline also provides core's native dialog component (B8). -->
+    <!-- ECharts for the interactive-output per-job trend chart. Ships its JS/CSS as this API plugin
+         (no bundled jar), version managed by the bom (bom-weekly manages echarts-api
+         6.0.0-1287.vfd24c22a_3d00), so it is not pinned here. -->
     <dependency>
-      <groupId>org.jenkins-ci.plugins</groupId>
-      <artifactId>pipeline-input-step</artifactId>
-    </dependency>
-
-    <dependency>
-      <groupId>org.jenkins-ci.plugins</groupId>
-      <artifactId>structs</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>org.jenkins-ci.plugins</groupId>
-      <artifactId>script-security</artifactId>
+      <groupId>io.jenkins.plugins</groupId>
+      <artifactId>echarts-api</artifactId>
     </dependency>
 
     <!-- Ionicons "symbols" for the notification icon (bell/badge/sidebar). Theme-aware and the
@@ -119,13 +94,6 @@
     <dependency>
       <groupId>io.jenkins.plugins</groupId>
       <artifactId>ionicons-api</artifactId>
-    </dependency>
-
-    <!-- JCasC: optional at runtime (air-gapped masters install without it) -->
-    <dependency>
-      <groupId>io.jenkins</groupId>
-      <artifactId>configuration-as-code</artifactId>
-      <optional>true</optional>
     </dependency>
 
     <!-- Safe markdown rendering (context + free-text preview). The markdown-formatter plugin ships
@@ -140,13 +108,56 @@
       <version>346.v3c6828ddd39e</version>
     </dependency>
 
-    <!-- ===== test scope ===== -->
-    <!-- CPS engine: only needed to author pipeline scripts in tests (CpsFlowDefinition). The plugin's
-         runtime code is execution-engine agnostic (workflow-step-api only), so this is NOT a runtime
-         dependency — keeping it test-scoped avoids forcing a workflow-cps floor on installs. -->
+    <!-- Syntax highlighting for the interactive-view review page (any language shown as escaped,
+         highlighted SOURCE — never executed). Prism ships its JS/CSS as this API plugin, so we depend
+         on the plugin rather than bundling prismjs (review item B12 / packaging convention). Version is
+         managed by the bom (bom-weekly manages prism-api 1.30.0-741.v034eb_0b_0a_a_fa_), so it is not
+         pinned here. -->
+    <dependency>
+      <groupId>io.jenkins.plugins</groupId>
+      <artifactId>prism-api</artifactId>
+    </dependency>
+
+    <!-- Modal dialog surface + input bridge target. Version managed by the bom chain
+         (bom-2.568.x); the 2.568 baseline also provides core's native dialog component (B8). -->
+    <dependency>
+      <groupId>org.jenkins-ci.plugins</groupId>
+      <artifactId>pipeline-input-step</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.jenkins-ci.plugins</groupId>
+      <artifactId>script-security</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.jenkins-ci.plugins</groupId>
+      <artifactId>structs</artifactId>
+    </dependency>
+    <!-- FlowNode + PauseAction for the anchored console link / "Paused" flow-graph marker (§console audit). -->
     <dependency>
       <groupId>org.jenkins-ci.plugins.workflow</groupId>
-      <artifactId>workflow-cps</artifactId>
+      <artifactId>workflow-api</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.jenkins-ci.plugins.workflow</groupId>
+      <artifactId>workflow-durable-task-step</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.jenkins-ci.plugins.workflow</groupId>
+      <artifactId>workflow-job</artifactId>
+    </dependency>
+    <!-- Pipeline / workflow (versions managed by BOM unless noted) -->
+    <dependency>
+      <groupId>org.jenkins-ci.plugins.workflow</groupId>
+      <artifactId>workflow-step-api</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.jenkins-ci.plugins.workflow</groupId>
+      <artifactId>workflow-support</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.jenkins.configuration-as-code</groupId>
+      <artifactId>test-harness</artifactId>
       <scope>test</scope>
     </dependency>
     <dependency>
@@ -154,9 +165,14 @@
       <artifactId>workflow-basic-steps</artifactId>
       <scope>test</scope>
     </dependency>
+
+    <!-- ===== test scope ===== -->
+    <!-- CPS engine: only needed to author pipeline scripts in tests (CpsFlowDefinition). The plugin's
+         runtime code is execution-engine agnostic (workflow-step-api only), so this is NOT a runtime
+         dependency — keeping it test-scoped avoids forcing a workflow-cps floor on installs. -->
     <dependency>
-      <groupId>io.jenkins.configuration-as-code</groupId>
-      <artifactId>test-harness</artifactId>
+      <groupId>org.jenkins-ci.plugins.workflow</groupId>
+      <artifactId>workflow-cps</artifactId>
       <scope>test</scope>
     </dependency>
   </dependencies>

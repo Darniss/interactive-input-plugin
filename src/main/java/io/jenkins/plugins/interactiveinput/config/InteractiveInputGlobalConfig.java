@@ -153,6 +153,8 @@ public class InteractiveInputGlobalConfig extends GlobalConfiguration {
         f.setRestApi(false);
         f.setInputStepBridge(false);
         f.setDashboardTile(false);
+        f.setInteractiveView(false);
+        f.setInteractiveOutput(false);
         return f;
     }
 

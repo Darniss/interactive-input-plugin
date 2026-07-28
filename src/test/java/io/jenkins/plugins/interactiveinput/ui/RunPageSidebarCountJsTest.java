@@ -38,8 +38,18 @@ class RunPageSidebarCountJsTest {
         FreeStyleBuild b = j.buildAndAssertSuccess(p); // build #1
         QuestionStore store = QuestionStore.get();
         store.submit(new Question(
-                "rn1", "Approve?", List.of(new Choice("yes", "Yes")), false, 0L, null, null, JOB, b.getNumber(), null,
-                System.currentTimeMillis(), false));
+                "rn1",
+                "Approve?",
+                List.of(new Choice("yes", "Yes")),
+                false,
+                0L,
+                null,
+                null,
+                JOB,
+                b.getNumber(),
+                null,
+                System.currentTimeMillis(),
+                false));
 
         try (JenkinsRule.WebClient wc = j.createWebClient()) {
             wc.getOptions().setJavaScriptEnabled(true);

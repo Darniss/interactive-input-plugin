@@ -71,8 +71,112 @@ All notable changes to this project are documented here. The format follows
   agent posts a series), its build-list dot opens one modal that pages through them with a numbered
   slider (Prev/Next + clickable pips, answered slides marked done). Individual questions on the other
   surfaces (bell dropdown, job-page box) are still answered one at a time.
+- **`interactiveView` pipeline step + review page** — publish a generated file (markdown, HTML, source
+  code or plain text) for a Confluence-style review inside Jenkins:
+  - `interactiveView(file | includes | dir, excludes, reportName, title, format, mode, commentable,
+    editable, notify, wait, slaMinutes, submitterFilter)` **snapshots** the target workspace file(s) into a
+    durable store (`$JENKINS_HOME/interactive-input/views/`, metadata in `views.xml`), so the review
+    survives workspace cleanup. Markdown is rendered to sanitised HTML; HTML/code/text are shown as
+    **escaped, syntax-highlighted source** (never executed) via `prism-api`. Snapshots are bounded
+    (2&nbsp;MB each).
+  - **Folders & dynamically-generated files** — beyond a single `file`, the step accepts an Ant-style
+    `includes` glob (e.g. `reports/**/*.md`) with optional `excludes`, or a `dir` (sugar for `dir/**`).
+    Each match becomes **one review** sharing a `groupId` + `reportName`, so a report folder whose exact
+    filenames are only known at runtime is published in a single call. Bounded by a max file count (50)
+    and an aggregate snapshot cap (8&nbsp;MB); `wait: true` stays single-file (a glob that resolves to
+    more than one file is rejected with a clear error).
+  - **Review vs informational mode** — `mode: 'review'` (default) shows the decision toolbar
+    (approve / request changes / reject / acknowledge) and can block/notify; `mode: 'info'` is a
+    read-only, still-commentable viewer with no decision. "Needs approval vs not" is expressed per call
+    (different glob + `mode`/`notify`).
+  - Reviewers can add **inline comments** — per source line in the Source view **and** per line in the
+    Rendered view: selecting a rendered Markdown block opens a **line picker** that anchors the comment to
+    the exact source line inside that block (both views map to the same source line, so they round-trip
+    either way) — plus general comments, edit the durable
+    review **copy** with **version history** (the original workspace file is never modified), and
+    **approve / request changes / reject / acknowledge**. Non-blocking by default (publish and continue);
+    `wait: true` pauses the pipeline until a decision (or the SLA), returning
+    `{id, status, decidedBy, version, content, comments}` — none of the decisions abort the run (mirrors
+    the durable, restart-safe `askInteractive` pattern). **Request changes** (`CHANGES_REQUESTED`) returns
+    the inline `comments` (`{id, line, body, author, createdTs, resolved}`) so a generator — e.g. an AI
+    agent — can course-correct the file and re-publish: a human-in-the-loop **regenerate loop**.
+  - Surfaces: a dedicated **"Interactive View"** left-sidebar link (with a **live open-review count
+    badge**, job- and build-scoped, updated without a page reload — and, in the experimental layout's
+    **"more actions"** overflow menu, the pending count rendered inline via the action display name)
+    opening a two-pane editor
+    (`viewer.js`/`viewer.css`) and a per-job list page **grouped by report/folder** with
+    **Needs-approval vs Informational** sections, a **Notified** badge, and **All / Notified /
+    Needs-approval** filter chips + search; a build-history badge; an anchored console deep-link; and a
+    **"Reviews"** section in the notification bell that routes clicks to the editor page. The
+    sidebar/editor stay reachable after the build completes (any readable review), so decided reviews'
+    comments and version history remain accessible.
+  - **Notification scoping parity** — the review surfaces honour the same two **System** switches as
+    questions: `userScopedNotifications` (a viewer sees only reviews for **builds they started**, plus
+    ownerless trigger/SCM/timer builds) and `lockToBuildStarter` (non-starters may **see** but not
+    contribute — comment/edit/decision — while `Jenkins.ADMINISTER` still overrides). Ownership resolves
+    via `ReviewDocument.createdBy` + `CauseResolver`; the REST JSON carries a per-review `canContribute`
+    flag and the editor locks its controls when it is `false`. Dashboard-cumulative vs per-pipeline counts
+    flow through the same scoped store methods, so the bell and sidebar inherit scoping.
+  - REST under `/interactive-input/api/v1/views`: `GET /views` (scoped `?job=`, `?job=&build=`,
+    `?all=`), `GET /views/{id}`, `GET /views/{id}/raw?version=n`, and `@RequirePOST`
+    `comments` / `edit` / `decision` / `resolveComment` — permission-checked (`Item.READ` to view,
+    `Item.BUILD`/submitter to contribute, `Jenkins.ADMINISTER` for `?all=true`), CSRF-crumbed, 404 no-leak.
+- **`interactiveOutput` pipeline step + statistics widgets** — publish per-build / per-job statistics
+  (e.g. cost report, carbon footprint, resource usage):
+  - `interactiveOutput(reportName, metrics: [[label, value, unit, key], …], chartType, notify)` stores a
+    `MetricReport` in the build's `InteractiveOutputBuildAction` (persisted in `build.xml`; no extra
+    store). The build page shows **KPI cards + a table** (`summary.jelly`) and a dedicated details page.
+  - **Selectable chart types** — `chartType` (`line` default | `bar` | `pie` | `timeseries`) is chosen per
+    report in the script. `InteractiveOutputJobAction` emits **one chart model per report** via
+    `echarts-api` (theme-aware, built in `output.js` from a server-provided JSON model): `line`/`bar` plot
+    the numeric metrics **across recent builds** (stable `key` feeds the trend), `pie` shows the **latest
+    build's** numeric metrics as slices, and `timeseries` plots the latest build's metrics **by date** when
+    each metric's label is a date (`yyyy`, `yyyy-MM`, `yyyy-MM-dd`, `yyyy-MM-dd HH:mm`) — points are
+    emitted sorted by date and re-bucketed client-side with a **Time / Day / Month / Year** granularity
+    toggle. Several reports render several charts. All labels/tooltips are escaped (no HTML injection).
+  - **Client-side table filter + sort** — every metrics table (build and job pages) gains a search box
+    and click-to-sort column headers (`output.js`, no backend change); a column of dates sorts
+    chronologically and gains a **"Group by date"** (Day / Month / Year) control that reorders the rows by
+    the truncated date.
+- **Feature flags** — `interactiveView` and `interactiveOutput` added to `features` (both default
+  **on**; the surfaces appear only when the steps are actually called), toggleable under
+  **Manage Jenkins → System → Interactive Input** and as code under `unclassified.interactiveInput.features`.
+- **Dependencies** — `prism-api` (syntax highlighting for the review page) and `echarts-api` (the
+  per-job trend chart) added; both are BOM-managed and ship their own JS/CSS as plugin dependencies
+  (no bundled jars, so `strictBundledArtifacts` stays on).
 
 ### Changed
+- **Under the experimental layout, our UI now renders natively instead of inside the "Legacy" card.**
+  The experimental build page routes every action's `summary.jelly` into a hardcoded core "Legacy"
+  card; previously our per-build Interactive Output KPIs and Interactive Input attention row landed
+  there. Now, when the user's **new-build-page** flag is on, each renders as a **native overview card
+  + run tab** via `jenkins.model.Tab` (`InteractiveOutputRunTab`, `InteractiveInputRunTab`, attached by
+  a `TransientActionFactory<Run>` behind the same visibility gates, each with a `widget.jelly` card and
+  a redirecting `doIndex` to the canonical page), and the classic `summary.jelly` rows are **suppressed**
+  (new `classicSummaryVisible()` = `visible && !newBuildPage()`) so nothing of ours remains in "Legacy".
+  On the experimental **job** page the large inline `ii-jobcard` box is hidden (new
+  `isJobBoxVisibleClassic()` = `jobPageBox && !newJobPage()`); the invisible `ii-tasklink` controllers
+  stay, and reachability is unchanged (native "more actions" overflow + bell + the dedicated page).
+  Layout detection is a new null-safe `ExperimentalLayout` helper reading
+  `UserExperimentalFlag.getFlagValueForCurrentUser(...)`; any error **fails safe to the classic layout**.
+  Exactly one path renders per layout (the flag is the single switch), so there is no double-render, and
+  the **classic layout is unchanged**. Trade-off: this depends on experimental core-UI internals (the
+  `Tab` widget grid and the hardcoded flag IDs); if those drift, detection falls back to classic and the
+  existing actions stay reachable via the overflow menu. (A native experimental *job* card is not
+  possible today because `jenkins.widgets.WidgetFactory` is `@Restricted(NoExternalUse)`.)
+- **The experimental "more actions" overflow now shows the pending count for Interactive Input too.** That
+  menu is server-rendered from each action's display name, so `InteractiveInputJobAction.getDisplayName()`
+  now suffixes the count as `Interactive Input (N)` when at least one question is pending — matching
+  `Interactive View (N)` (core exposes no styled-badge slot in that menu). The classic sidebar is
+  unchanged: `bell.js` (`mountTaskLink`) resets the label to the plain name and shows the count as a live
+  `jenkins-badge` pill, so there is no double count. The `jobPageBox` Appearance help text now documents
+  that the inline box is **classic-only** (the experimental job layout has no native job-card slot); the
+  count still surfaces there via the header bell, the "more actions" menu, and the dedicated Interactive
+  Input page.
+- **README coverage of the newer steps.** The "How it works" diagram, "Why this plugin exists", the
+  pause → approve → resume flow, and the "Human-in-the-loop scenarios" now describe `interactiveView`
+  (review → request changes → regenerate, with `wait: true` returning the reviewer's inline comments) and
+  `interactiveOutput` (non-blocking per-build stats + per-job trend charts), not just `askInteractive`.
 - **Build-list badge is now an empty red pulsing dot that opens the answer modal in place.** It no
   longer renders the notification icon and no longer navigates to the per-build audit page; clicking it
   opens the same modal the header bell uses, on the current page. Handled by `bell.js` via
@@ -103,6 +207,14 @@ All notable changes to this project are documented here. The format follows
   longer stays stale until a full page reload.
 
 ### Fixed
+- **`interactiveView` / `interactiveOutput` now default *on* after an upgrade.** Found during live
+  validation on 2.568.1: a controller that already had a saved System config (from a build predating
+  these two flags) loaded them as `false`, silently hiding the new surfaces. XStream instantiates the
+  `Features` object without running field initialisers, so plain `boolean` fields defaulted to `false`
+  for any element absent from the persisted `<features>` block. Both new flags are now nullable
+  `Boolean`, so "absent in the saved XML" means default-on via the getters, while an explicit
+  `true`/`false` from the System form or JCasC is still honoured. (The five pre-existing flags are
+  unaffected — they are always present in any saved config.)
 - **Notification bell now appears inside a pipeline/job, not only on the dashboard.** The shared
   `bell.js` adjunct is emitted by `jobMain.jelly` in the job page's *main panel* — earlier in the
   document than the footer bell mount (`#interactive-input-bell`, a `PageDecorator`) and the sidebar
@@ -151,6 +263,31 @@ All notable changes to this project are documented here. The format follows
   clean); **cross-origin or missing** → a red-circle glyph (U+1F534 emoji) + `(N)` prefix on the tab
   **title**, with the favicon left exactly as the theme set it. It never replaces the site favicon. Gated
   by the `tabNotificationBadge` Appearance toggle (on by default).
+- **Inline comments no longer blank the review pane.** Found during live validation: posting an inline
+  comment (or toggling *resolved*) made the left pane disappear until a manual page reload. Root cause:
+  the `comments` / `resolveComment` REST endpoints returned a **summary** JSON (no `content` /
+  `renderedHtml`), and the editor replaced its detail state with that response — so the source/rendered
+  view had nothing to draw. Both endpoints now return the **full** document (as `edit` / `decision`
+  already did); `viewer.js` also keeps the prior `content`/`renderedHtml` defensively if any future
+  response omits them.
+- **Decided reviews' comments & history stay reachable after the build completes.** The job-level
+  "Interactive View" sidebar link was gated on *open* reviews only (`getPendingCount() > 0`), so once a
+  review was decided the cross-build listing — and the path to its comments/version history —
+  disappeared. The link now shows whenever the job has **any readable review** (`isHasAnyReviews`,
+  mirroring the output action's `hasAnyOutput`), while the live badge still counts only pending reviews.
+- **Review-card "Notified" badge no longer overlaps the comment count.** The Interactive View list/card
+  "Notified" pill used the class `iv-badge`, which also names a 10&nbsp;px circular build-history dot in the
+  globally-loaded `bell.css`. On the review pages both stylesheets load, so the rules merged and forced the
+  pill to a 10&nbsp;px circle — its label overflowed onto the adjacent "N comment(s)". The pill is renamed
+  `iv-flag` (a distinct class), removing the collision regardless of stylesheet load order.
+- **New surfaces are reachable under the experimental job/build layout — without a duplicate link.** The
+  experimental layout removes the classic `#tasks` sidebar and routes action contributions into a "Legacy"
+  card. Reachability is provided by core's native **"more actions" overflow menu**, which lists any action
+  exposing an icon + display name (both job actions do, gated on having a readable review / output). An
+  earlier hidden `data-ii-exp-link` fallback link (revealed by `bell.js`) has been **removed**: under the
+  experimental layout it landed in the "Legacy" card and produced a **duplicate** "Interactive View" entry
+  (`bell.js` could also duplicate its label text). All new UI uses design-system classes / theme variables
+  and renders correctly in both classic and experimental layouts, light and dark.
 
 ### Notes / trade-offs
 - The durable audit record is the build console line; the per-build audit *page* is a live view of the

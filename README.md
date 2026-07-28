@@ -18,6 +18,8 @@
 - [How it works](#how-it-works)
 - [Quick start](#quick-start)
 - [The `askInteractive` step](#the-askinteractive-step)
+- [The `interactiveView` step](#the-interactiveview-step)
+- [The `interactiveOutput` step](#the-interactiveoutput-step)
 - [Human-in-the-loop scenarios](#human-in-the-loop-scenarios)
 - [Drive it from an AI agent (Python)](#drive-it-from-an-ai-agent-python)
 - [REST API](#rest-api)
@@ -35,12 +37,13 @@
 
 ## Why this plugin exists
 
-Jenkins has shipped a pipeline `input` step for years. It works, but it has two long‑standing gaps for teams doing serious human‑in‑the‑loop automation:
+Jenkins has shipped a pipeline `input` step for years. It works, but it has three long‑standing gaps for teams doing serious human‑in‑the‑loop automation:
 
 1. **There is no in‑UI signal that a build is waiting for you.** A paused build sits silently until someone happens to open the right build page. Approvers miss deploys; pipelines idle for hours against their will.
 2. **The approval surface is minimal.** The built‑in prompt is a message, an OK button, and optional form parameters. There is no place for rich context (release notes, a diff, a risk summary), no notion of *why* each choice exists, and no first‑class way for an **external agent** to answer programmatically with a clean, versioned contract.
+3. **There is nowhere to review a generated artifact or see a build's results in context.** When a pipeline — or an AI agent — produces a file (a design doc, a Terraform plan, release notes, a PR), there is no in‑Jenkins way to review it line by line, leave comments, and feed those comments back for regeneration; and per‑build metrics (cost, resource usage, carbon footprint) live only in the log, with no cards or trend across builds.
 
-`interactive-input` closes both gaps **without changing anything about how your existing pipelines behave**. It adds a notification bell, a rich modal, a durable `askInteractive` step, and a REST API — all opt‑in, all governed by the same permission model Jenkins already enforces on `input`.
+`interactive-input` closes all three gaps **without changing anything about how your existing pipelines behave**. It adds a notification bell, a rich modal, a durable `askInteractive` step, a Confluence‑style file‑review surface (`interactiveView`) with a comment‑and‑regenerate loop, a per‑build statistics surface (`interactiveOutput`), and a REST API — all opt‑in, all governed by the same permission model Jenkins already enforces on `input`.
 
 ---
 
@@ -82,6 +85,8 @@ Both pause a pipeline and wait for a human. Here is what changes:
 - 🪟 **Rich modal** — Markdown context panel (**expanded by default**), radio choices each with an optional rationale, optional free‑text with a live (server‑sanitised) preview, full keyboard/focus‑trap accessibility. Shared by the bell and every per‑project surface.
 - 📨 **Per‑pipeline notification preferences** — a *Configure* section (email/Teams/recipients/webhook) that persists intent now; delivery ships in a future release.
 - 🧩 **`askInteractive` step** — a durable pipeline step that returns the chosen id (or free text), throws on abort, and times out on SLA.
+- 📝 **`interactiveView` step** — publish a generated file — or a **whole folder / glob of dynamically‑created files** (`includes`/`dir`, one review per match) — for a **Confluence‑style review** inside Jenkins: **inline comments** (per line on the source, or per line on the rendered Markdown via a line picker) plus general comments, an editable review **copy** with version history (the original file is never touched), and **approve / request changes / reject / acknowledge** (or a read‑only `mode: 'info'` viewer). Non‑blocking by default, or `wait: true` to pause the pipeline on the decision — which returns the reviewer's **inline comments** so a generator (e.g. an AI agent) can regenerate on *Request changes*. The per‑job page groups reviews by report/folder with **Needs‑approval vs Informational** sections and filters; content is snapshotted durably; code/HTML is shown as **escaped, syntax‑highlighted source** (never executed) via `prism-api`.
+- 📊 **`interactiveOutput` step** — publish per‑build statistics (cost, carbon footprint, resource usage, …) as **KPI cards + a filterable/sortable table** on the build page and a **per‑job chart** across builds via `echarts-api`, with a selectable `chartType` (**line / bar / pie / time‑series**) per report — time‑series plots date‑labelled metrics with a Time / Day / Month / Year granularity toggle.
 - 🌐 **Versioned REST API** — `GET/POST` JSON under `/interactive-input/api/v1/`, permission‑checked, CSRF‑protected, with a stable envelope.
 - 🌉 **`inputStepBridge`** — opt‑in reconciliation that mirrors *existing* native `input` steps into the bell/modal/API, forwarding answers back to the native step. Zero pipeline changes.
 - ⏱️ **SLA + retention** — expire overdue questions; compact terminal ones after a retention window.
@@ -97,19 +102,28 @@ flowchart LR
   subgraph Pipeline
     A["askInteractive(...)"] -->|register| S[(QuestionStore\nXmlFile-persisted)]
     B["native input(...)"] -.->|opt-in bridge| S
+    V["interactiveView(...)"] -->|publish review| VS[(ViewStore\nXmlFile-persisted)]
+    O["interactiveOutput(...)"] -->|persist stats| BA["Per-build output action\n(build.xml)"]
   end
   S --> BELL["🔔 Notification bell\n(polls REST)"]
+  VS --> BELL
   S --> REST["/interactive-input/api/v1/**"]
-  BELL --> MODAL["Rich modal"]
-  MODAL -->|answer/abort| REST
-  AGENT["External agent\n(any language)"] -->|answer/abort| REST
+  VS --> REST
+  BELL --> MODAL["Rich modal / review editor"]
+  MODAL -->|"answer/abort · comment/decision"| REST
+  AGENT["External agent\n(any language)"] -->|"answer, or regenerate on Request changes"| REST
   REST -->|resolve| S
+  REST -->|comment/decide| VS
   S -->|resume/throw/timeout| A
   S -.->|forward proceed/abort| B
+  VS -->|"wait:true → inline comments + decision"| V
+  BA --> CHARTS["Per-job trend charts\n+ KPI cards"]
   TICK["SLA ticker\n(AsyncPeriodicWork)"] --> S
 ```
 
-A paused step registers a `Question` in a durable, permission‑aware `QuestionStore`. The bell polls the REST API for questions the current user may answer; the modal (or any external agent) answers via `POST …/answer`; the store resolves the question and the pipeline resumes, throws (`abort`), or times out (SLA). Question metadata survives a controller restart via XStream; transient resolvers are re‑attached on step resume.
+A paused `askInteractive` step registers a `Question` in a durable, permission‑aware `QuestionStore`. The bell polls the REST API for questions the current user may answer; the modal (or any external agent) answers via `POST …/answer`; the store resolves the question and the pipeline resumes, throws (`abort`), or times out (SLA). Question metadata survives a controller restart via XStream; transient resolvers are re‑attached on step resume.
+
+`interactiveView` publishes a durable `ReviewDocument` — an editable copy of the file (or one per file in a folder/glob) — to the `ViewStore`; reviewers add inline and general comments and a decision (approve / request changes / reject / acknowledge) through the same permission‑checked REST layer, and with `wait: true` the step returns the decision **and** the reviewer's inline comments so a generator (e.g. an AI agent) can regenerate on *Request changes*. `interactiveOutput` is non‑blocking: it persists per‑build statistics into the build itself and renders them as KPI cards + a filterable table on the build page and per‑job trend charts across builds.
 
 ### The pause → approve → resume flow
 
@@ -121,6 +135,17 @@ What a person actually experiences, end to end:
 4. **Resume.** On answer the build **continues from where it paused** with the returned value; **Deny** aborts the build (exactly like `input`); an unanswered question **auto‑expires** on its SLA. Either way the outcome (who answered and what they chose) is written to the console and the per‑build audit page.
 
 A restart mid‑pause is safe: the question is persisted, and the build re‑attaches to it (and resumes immediately if it was answered while the controller was down).
+
+### The review → request changes → regenerate flow (`interactiveView`)
+
+`interactiveView` follows the same shape for **files** instead of a yes/no question:
+
+1. **Publish.** The pipeline — or an AI agent — calls `interactiveView(file: 'report.md', …)`, or points it at a folder / glob of dynamically generated files (one review per match). Each file becomes a durable, editable review **copy**; the original on disk is never touched.
+2. **Notice.** The review surfaces on the header bell, the per‑job **Interactive View** page (grouped by report/folder, with *Needs‑approval vs Informational* sections and filters), and the build‑history badge — just like a pending question.
+3. **Review.** A reviewer reads the file (rendered Markdown, or escaped syntax‑highlighted source — never executed), leaves **inline comments** (per line on either view) and general comments, and picks **Approve**, **Request changes**, **Reject**, or **Acknowledge**. `mode: 'info'` makes it a read‑only viewer.
+4. **Resume / regenerate.** With `wait: true` the step blocks on the decision and returns it **together with the reviewer's inline comments**, so a generator can regenerate the file from those comments and publish a new version (the editor keeps a **version history**). Without `wait` the publish is non‑blocking.
+
+`interactiveOutput` needs no pause at all — it is a **non‑blocking** post/summary step: it records the build's statistics and renders them as KPI cards + a filterable table on the build page and a trend chart across builds on the job page.
 
 ---
 
@@ -178,6 +203,127 @@ When this build reaches the step it pauses, the bell lights up for everyone allo
 
 ---
 
+## The `interactiveView` step
+
+Publish a generated file for review inside Jenkins — like commenting on a Confluence page. The file's
+content is **snapshotted** into a durable store at step time (so the review survives workspace cleanup);
+Markdown is rendered safely, while HTML and any programming language are shown as **escaped,
+syntax‑highlighted source** (never executed). Runs inside a `node { }` (it needs a workspace to read the
+file).
+
+```groovy
+node {
+  // …generate report.md (or a .html / .java / .py / .txt …)…
+  interactiveView(file: 'report.md', reportName: 'Release notes')          // non‑blocking: publish and continue
+
+  // A whole folder of dynamically-generated files (exact names unknown at author time):
+  // one review per match, grouped under the same reportName.
+  interactiveView(includes: 'reports/**/*.md', reportName: 'Nightly reports', mode: 'info')
+
+  // Or pause the pipeline until a reviewer decides (single file only):
+  def decision = interactiveView(file: 'plan.md', reportName: 'Deploy plan',
+                                 editable: true, wait: true, slaMinutes: 120)
+  echo "Review ${decision.status} by ${decision.decidedBy} (v${decision.version})"
+  if (decision.status == 'REJECTED') { error 'Deploy plan rejected' }
+}
+```
+
+Provide **exactly one** file source: `file`, `includes`, or `dir`.
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `file` | String | — | Workspace‑relative path to a single file to review. Bounded to 2&nbsp;MB. |
+| `includes` | String | — | Ant‑style glob of files to review (e.g. `reports/**/*.md`); one review per match, up to 50 files / 8&nbsp;MB total. |
+| `excludes` | String | — | Ant‑style glob subtracted from `includes` / `dir`. |
+| `dir` | String | — | Directory to review (sugar for `dir/**`); one review per file found. |
+| `mode` | String | `review` | `review` = decision toolbar (approve / request changes / reject / acknowledge), can block/notify; `info` = read‑only, still commentable, no decision. |
+| `reportName` | String | file base name | Name shown as the review title / section heading; matched files are grouped under it. |
+| `title` | String | `reportName` | Optional explicit page title (single‑file only; globbed files title from their relative path). |
+| `format` | String | auto (by extension) | Override rendering: `markdown` \| `html` \| `code` \| `text`. |
+| `commentable` | boolean | `true` | Allow inline comments (per source line, **and** per line in the rendered Markdown via a line picker) plus general comments. |
+| `editable` | boolean | `false` | Allow editing the durable review **copy** (versioned; the original file is untouched). |
+| `notify` | boolean | `true` | Surface the review in the notification bell's **Reviews** section. |
+| `wait` | boolean | `false` | Block the pipeline until a decision (or SLA); otherwise publish and continue. **Single file only** — a glob resolving to more than one file is rejected. |
+| `slaMinutes` | int | `-1` → global default | For `wait: true`, auto‑expire after N minutes. `0` = wait forever. |
+| `submitterFilter` | String | `null` | Comma‑separated users/groups permitted to comment/edit/decide (same semantics as `input`'s `submitter`). |
+
+**Where it shows** — an **"Interactive View"** link in the run's left sidebar opens the two‑pane editor
+(rendered document / highlighted source on the left; comment threads on the right, with edit‑copy
+history and Approve / Request changes / Reject / Acknowledge — the decision toolbar is hidden for
+`mode: 'info'` items). Add an inline comment by hovering a source line and clicking the **+**, or, in the
+rendered view, selecting a block and picking the exact source line to anchor the comment to. The sidebar
+link carries a **live count badge** of open reviews (job‑ and build‑scoped,
+updated without a page reload) and stays visible after the build completes, so decided reviews' comments
+and version history remain reachable. The build console gets an anchored deep‑link, the build‑history row
+shows a small badge while a review is open, and the job gets a **list page grouped by report/folder**
+with **Needs‑approval vs Informational** sections, a **Notified** badge, and **All / Notified /
+Needs‑approval** filter chips + search. All of this works in both the classic and experimental job/build
+layouts (light and dark): under the experimental layout the per‑build surfaces render as **native overview
+cards** (not inside core's "Legacy" card), and the pages stay reachable via the native **"more actions"**
+overflow menu. The review surfaces honour the same **System** switches as questions —
+`userScopedNotifications` (see only your own builds' reviews) and `lockToBuildStarter` (non‑starters may
+view but not contribute) — see [Configuration (UI + JCasC)](#configuration-ui--jcasc).
+
+**Return value** — non‑blocking returns the review **id** (`String`). With `wait: true` it returns a map
+`{id, status, decidedBy, version, content, comments}` where `status` is `APPROVED` / `REJECTED` /
+`ACKNOWLEDGED` / `CHANGES_REQUESTED` (these **do not** abort the run — branch on them) and `comments` is a
+list of `{id, line, body, author, createdTs, resolved}` (`line` is the 1‑based source line for an inline
+comment, or `-1` for a general note). An elapsed SLA throws a timeout.
+
+**Regenerate loop** — *Request changes* (`status == 'CHANGES_REQUESTED'`) hands the inline comments back
+so a generator can course‑correct and re‑publish, until the reviewer approves:
+
+```groovy
+node {
+  while (true) {
+    generateReport('report.md')   // your generator / AI agent writes the file
+    def r = interactiveView(file: 'report.md', reportName: 'AI report', wait: true, commentable: true)
+    if (r.status != 'CHANGES_REQUESTED') { break }         // APPROVED / REJECTED / ACKNOWLEDGED -> stop
+    writeFile file: 'comments.json', text: groovy.json.JsonOutput.toJson(r.comments)
+    // …feed report.md + comments.json to the generator, then loop to regenerate…
+  }
+}
+```
+
+---
+
+## The `interactiveOutput` step
+
+Publish per‑build statistics (cost, carbon footprint, resource usage, …) as KPI cards + a table on the
+build page, and feed a per‑job trend chart across builds. Synchronous and non‑blocking; typically used
+in a post/summary phase. No workspace required.
+
+```groovy
+interactiveOutput(reportName: 'Cost report', chartType: 'bar', metrics: [
+  [label: 'Total cost',  value: '12.40', unit: 'USD',    key: 'cost'],
+  [label: 'CPU minutes', value: '318',   unit: 'min',    key: 'cpu'],
+  [label: 'Carbon',      value: '0.42',  unit: 'kgCO2e', key: 'carbon'],
+  [label: 'Status',      value: 'green']                       // non‑numeric: shown, but not trended
+])
+```
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `reportName` | String (required) | — | Report name, shown as the section heading (e.g. "Cost report"). |
+| `metrics` | List of maps | `[]` | Each: `[label: 'X', value: '12.4', unit: 'USD', key: 'cost']`. `unit` and `key` are optional. |
+| `chartType` | String | `line` | Per‑job chart for this report: `line` \| `bar` (numeric metrics across recent builds) \| `pie` (the latest build's numeric metrics as slices) \| `timeseries` (the latest build's metrics plotted by date when each label is a date — `yyyy`, `yyyy-MM`, `yyyy-MM-dd`, `yyyy-MM-dd HH:mm` — with a Time / Day / Month / Year granularity toggle). |
+| `notify` | boolean | `false` | Log an anchored link to the build's Interactive Output page in the console. |
+
+**Where it shows** — the build's main page shows KPI cards + a **filterable, sortable table** (search box +
+click‑to‑sort headers; a column of dates sorts chronologically and gains a **Group by date** — Day / Month /
+Year — control), plus an **"Interactive Output"** sidebar page with the full detail; the job gets an
+**"Interactive Output"** page with a theme‑aware chart **per report** (`line`/`bar`/`pie`/`timeseries`, chosen
+by `chartType`). A metric feeds line/bar trends when its `value` is numeric (a leading currency symbol and
+thousands separators are tolerated, e.g. `$1,234.5`) and it carries a stable `key` that identifies the
+series across builds (the `key` defaults to the `label`); `pie` plots the latest build's numeric metrics;
+`timeseries` plots the latest build's metrics against their date labels, re‑bucketed live to the chosen
+Time / Day / Month / Year granularity.
+Data is stored in the build itself (`build.xml`), so no extra store is needed. Both pages render correctly
+in the classic and experimental layouts (light and dark) — under the experimental layout the per‑build
+KPIs render as a **native overview card** rather than inside core's "Legacy" card.
+
+---
+
 ## Human-in-the-loop scenarios
 
 Every pause shows the **same rich modal**. What changes is the *shape* of the question, and that is set by two `askInteractive` inputs: `choices` (zero or more options to pick from) and `allowFreeText` (whether a typed answer is allowed). If one build asks several questions at once, they become the numbered **"series" slider**.
@@ -222,6 +368,16 @@ The same surface is just as useful with **no AI in the loop** — the modal is i
 - **Existing `input` steps, lit up** — turn on `inputStepBridge` and every *native* `input` in your current pipelines gains the bell / badge / modal with **zero pipeline edits** (see [Bridging existing `input` steps](#bridging-existing-input-steps)).
 - **Answered by another system** — a non-AI script, a ChatOps bot, or an upstream CI job answers via the [REST API](#rest-api) (`POST …/answer`) instead of a human clicking — the same permission checks apply.
 - **Time-boxed approval** — set `slaMinutes` so an unattended gate auto-expires (throws) instead of pausing forever.
+
+### Reviewing generated files and publishing build stats
+
+Beyond yes/no questions, two steps cover the "review an artifact" and "show the results" loops (each has its own section: [`interactiveView`](#the-interactiveview-step), [`interactiveOutput`](#the-interactiveoutput-step)):
+
+- **Review an AI‑generated document** — an agent writes release notes / a design doc / a runbook; `interactiveView(file: 'notes.md', wait: true)` publishes it for a Confluence‑style review. A human leaves **inline comments** and clicks **Request changes**; the step returns those comments so the agent regenerates and republishes a new version.
+- **Approve a plan or a PR before it lands** — publish a Terraform plan, a migration script, or a diff for line‑by‑line review; **Approve** lets the pipeline proceed, **Reject** stops it, **Acknowledge** just records that it was seen.
+- **Review a whole folder of generated files** — point `interactiveView` at a `dir` / `includes` glob (one review per match) when a build emits many files (e.g. generated configs) that may or may not exist ahead of time.
+- **Read‑only publication** — `mode: 'info'` publishes a file as a durable, commentable reference without a decision gate.
+- **Per‑build cost / carbon / resource dashboard** — `interactiveOutput` records KPIs (cloud cost, carbon footprint, CPU‑hours, …) as cards + a filterable table on the build page and a **trend chart** across builds on the job page — non‑blocking, typically in a `post` block.
 
 ---
 
@@ -463,6 +619,8 @@ unclassified:
       restApi: true              # /interactive-input/api/v1/**
       inputStepBridge: false     # surface existing native input steps (opt-in)
       dashboardTile: false       # reserved for v0.2
+      interactiveView: true      # the interactiveView review step + surfaces
+      interactiveOutput: true    # the interactiveOutput statistics step + surfaces
     polling:
       intervalSeconds: 15        # poll cadence for the bell and per-project widgets (min 5)
     sla:

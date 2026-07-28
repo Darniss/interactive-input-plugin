@@ -75,8 +75,14 @@ class RestApiTest {
     void allParamRequiresAdminister(JenkinsRule j) throws Exception {
         secure(j);
         submit("q1");
-        assertEquals(403, get(j.createWebClient().login("reader"), j, BASE + "questions?all=true").getStatusCode());
-        assertEquals(200, get(j.createWebClient().login("admin"), j, BASE + "questions?all=true").getStatusCode());
+        assertEquals(
+                403,
+                get(j.createWebClient().login("reader"), j, BASE + "questions?all=true")
+                        .getStatusCode());
+        assertEquals(
+                200,
+                get(j.createWebClient().login("admin"), j, BASE + "questions?all=true")
+                        .getStatusCode());
     }
 
     @Test
@@ -97,20 +103,33 @@ class RestApiTest {
         assertEquals(0, json(readerResp).getInt("count"));
 
         // Unknown job -> 404 (never reveal existence).
-        assertEquals(404, get(j.createWebClient().login("builder"), j, BASE + "questions?job=does-not-exist").getStatusCode());
+        assertEquals(
+                404,
+                get(j.createWebClient().login("builder"), j, BASE + "questions?job=does-not-exist")
+                        .getStatusCode());
 
         // Overall/Read but no Item.READ on the job -> 404 (no leak).
-        assertEquals(404, get(j.createWebClient().login("outsider"), j, BASE + "questions?job=" + JOB).getStatusCode());
+        assertEquals(
+                404,
+                get(j.createWebClient().login("outsider"), j, BASE + "questions?job=" + JOB)
+                        .getStatusCode());
 
         // No Overall/Read at all -> 403 at the endpoint gate.
-        assertEquals(403, get(j.createWebClient(), j, BASE + "questions?job=" + JOB).getStatusCode());
+        assertEquals(
+                403, get(j.createWebClient(), j, BASE + "questions?job=" + JOB).getStatusCode());
     }
 
     @Test
     void buildScopedAuditIncludesAnswer(JenkinsRule j) throws Exception {
         secure(j);
         submit("q1");
-        assertEquals(200, postJson(j.createWebClient().login("builder"), j, BASE + "questions/q1/answer", "{\"choiceId\":\"yes\"}"));
+        assertEquals(
+                200,
+                postJson(
+                        j.createWebClient().login("builder"),
+                        j,
+                        BASE + "questions/q1/answer",
+                        "{\"choiceId\":\"yes\"}"));
 
         WebResponse audit = get(j.createWebClient().login("builder"), j, BASE + "questions?job=" + JOB + "&build=1");
         assertEquals(200, audit.getStatusCode());
@@ -121,7 +140,10 @@ class RestApiTest {
         assertEquals("yes", q0.getJSONObject("answer").getString("choiceId"));
 
         // A non-numeric build is rejected.
-        assertEquals(400, get(j.createWebClient().login("builder"), j, BASE + "questions?job=" + JOB + "&build=x").getStatusCode());
+        assertEquals(
+                400,
+                get(j.createWebClient().login("builder"), j, BASE + "questions?job=" + JOB + "&build=x")
+                        .getStatusCode());
     }
 
     @Test
@@ -152,18 +174,29 @@ class RestApiTest {
                 "a non-owner must not be able to answer while locked");
         assertEquals(
                 403,
-                postJson(j.createWebClient().login("mallory"), j, BASE + "questions/q1/answer", "{\"choiceId\":\"yes\"}"),
+                postJson(
+                        j.createWebClient().login("mallory"),
+                        j,
+                        BASE + "questions/q1/answer",
+                        "{\"choiceId\":\"yes\"}"),
                 "locked answer POST from a non-owner is refused");
 
         // The owner sees canAnswer=true and can answer.
         WebResponse owner = get(j.createWebClient().login("builder"), j, BASE + "questions?job=" + JOB);
         assertTrue(
                 owner.getStatusCode() == 200
-                        && json(owner).getJSONArray("questions").getJSONObject(0).getBoolean("canAnswer"),
+                        && json(owner)
+                                .getJSONArray("questions")
+                                .getJSONObject(0)
+                                .getBoolean("canAnswer"),
                 "the build starter may answer their own build");
         assertEquals(
                 200,
-                postJson(j.createWebClient().login("builder"), j, BASE + "questions/q1/answer", "{\"choiceId\":\"yes\"}"));
+                postJson(
+                        j.createWebClient().login("builder"),
+                        j,
+                        BASE + "questions/q1/answer",
+                        "{\"choiceId\":\"yes\"}"));
     }
 
     @Test
@@ -171,16 +204,40 @@ class RestApiTest {
         secure(j);
         submit("q1");
 
-        assertEquals(403, postJson(j.createWebClient().login("reader"), j, BASE + "questions/q1/answer", "{\"choiceId\":\"yes\"}"));
+        assertEquals(
+                403,
+                postJson(
+                        j.createWebClient().login("reader"),
+                        j,
+                        BASE + "questions/q1/answer",
+                        "{\"choiceId\":\"yes\"}"));
 
         // Unknown choice -> 400 validation error.
-        assertEquals(400, postJson(j.createWebClient().login("builder"), j, BASE + "questions/q1/answer", "{\"choiceId\":\"nope\"}"));
+        assertEquals(
+                400,
+                postJson(
+                        j.createWebClient().login("builder"),
+                        j,
+                        BASE + "questions/q1/answer",
+                        "{\"choiceId\":\"nope\"}"));
 
-        assertEquals(200, postJson(j.createWebClient().login("builder"), j, BASE + "questions/q1/answer", "{\"choiceId\":\"yes\"}"));
+        assertEquals(
+                200,
+                postJson(
+                        j.createWebClient().login("builder"),
+                        j,
+                        BASE + "questions/q1/answer",
+                        "{\"choiceId\":\"yes\"}"));
         assertEquals(QuestionStatus.ANSWERED, QuestionStore.get().get("q1").getStatus());
 
         // Second answer on a settled question -> 409.
-        assertEquals(409, postJson(j.createWebClient().login("builder"), j, BASE + "questions/q1/answer", "{\"choiceId\":\"yes\"}"));
+        assertEquals(
+                409,
+                postJson(
+                        j.createWebClient().login("builder"),
+                        j,
+                        BASE + "questions/q1/answer",
+                        "{\"choiceId\":\"yes\"}"));
     }
 
     @Test
@@ -190,7 +247,11 @@ class RestApiTest {
         // B26: the skip sentinel (automation/AI) is valid even though it is not a declared choice of q1.
         assertEquals(
                 200,
-                postJson(j.createWebClient().login("builder"), j, BASE + "questions/q1/answer", "{\"choiceId\":\"__skip__\"}"));
+                postJson(
+                        j.createWebClient().login("builder"),
+                        j,
+                        BASE + "questions/q1/answer",
+                        "{\"choiceId\":\"__skip__\"}"));
         JSONObject q = json(get(j.createWebClient().login("builder"), j, BASE + "questions/q1"));
         assertEquals("ANSWERED", q.getString("status"));
         assertEquals("__skip__", q.getJSONObject("answer").getString("choiceId"));
@@ -235,8 +296,11 @@ class RestApiTest {
                         "{\"parameters\":{\"ENV\":\"prod\",\"TIER\":\"a\"}}"));
         JSONObject after = json(get(j.createWebClient().login("builder"), j, BASE + "questions/qp"));
         assertEquals("ANSWERED", after.getString("status"));
-        assertEquals("prod", after.getJSONObject("answer").getJSONObject("parameters").getString("ENV"));
-        assertEquals("a", after.getJSONObject("answer").getJSONObject("parameters").getString("TIER"));
+        assertEquals(
+                "prod",
+                after.getJSONObject("answer").getJSONObject("parameters").getString("ENV"));
+        assertEquals(
+                "a", after.getJSONObject("answer").getJSONObject("parameters").getString("TIER"));
     }
 
     @Test
@@ -252,7 +316,10 @@ class RestApiTest {
                         j,
                         BASE + "questions/qp2/answer",
                         "{\"parameters\":{\"ENV\":\"prod\",\"TIER\":\"nope\"}}"));
-        assertEquals(QuestionStatus.WAITING, QuestionStore.get().get("qp2").getStatus(), "an invalid answer must not settle the question");
+        assertEquals(
+                QuestionStatus.WAITING,
+                QuestionStore.get().get("qp2").getStatus(),
+                "an invalid answer must not settle the question");
     }
 
     @Test
@@ -265,8 +332,18 @@ class RestApiTest {
         // modal cannot answer it, so questionJson must hand the client the build's input page URL.
         QuestionStore.get()
                 .submit(new Question(
-                        "qparam", "Need params", null, false, 0L, "params needed", null, JOB, 1, "tester",
-                        System.currentTimeMillis(), true));
+                        "qparam",
+                        "Need params",
+                        null,
+                        false,
+                        0L,
+                        "params needed",
+                        null,
+                        JOB,
+                        1,
+                        "tester",
+                        System.currentTimeMillis(),
+                        true));
         JSONObject qParam = json(get(j.createWebClient().login("builder"), j, BASE + "questions/qparam"));
         assertTrue(qParam.getJSONArray("choices").isEmpty(), "a parameterized bridged input has no choices");
         assertTrue(qParam.has("forwardUrl"), "the modal needs a forward URL to the input page: " + qParam);
@@ -275,8 +352,18 @@ class RestApiTest {
         // A bridged input that CAN be answered in-modal (a proceed choice) must NOT get a forward URL.
         QuestionStore.get()
                 .submit(new Question(
-                        "qproceed", "Proceed?", List.of(new Choice("__proceed__", "Approve / Proceed")), false, 0L,
-                        null, null, JOB, 1, "tester", System.currentTimeMillis(), true));
+                        "qproceed",
+                        "Proceed?",
+                        List.of(new Choice("__proceed__", "Approve / Proceed")),
+                        false,
+                        0L,
+                        null,
+                        null,
+                        JOB,
+                        1,
+                        "tester",
+                        System.currentTimeMillis(),
+                        true));
         JSONObject qProceed = json(get(j.createWebClient().login("builder"), j, BASE + "questions/qproceed"));
         assertFalse(qProceed.has("forwardUrl"), "an answerable bridged input needs no forward URL");
     }
@@ -304,8 +391,18 @@ class RestApiTest {
     private static void submit(String id, String startedBy) {
         QuestionStore.get()
                 .submit(new Question(
-                        id, "Approve?", List.of(new Choice("yes", "Yes")), false, 0L, null, null, JOB, 1, startedBy,
-                        System.currentTimeMillis(), false));
+                        id,
+                        "Approve?",
+                        List.of(new Choice("yes", "Yes")),
+                        false,
+                        0L,
+                        null,
+                        null,
+                        JOB,
+                        1,
+                        startedBy,
+                        System.currentTimeMillis(),
+                        false));
     }
 
     /** Seed a WAITING question that declares native input-style parameters (a string + a choice). B24. */
@@ -315,22 +412,35 @@ class RestApiTest {
                 new ChoiceParameterDefinition("TIER", new String[] {"a", "b"}, "tier"));
         QuestionStore.get()
                 .submit(new Question(
-                        id, "Provide values", null, false, 0L, null, null, JOB, 1, "tester",
-                        System.currentTimeMillis(), false, params));
+                        id,
+                        "Provide values",
+                        null,
+                        false,
+                        0L,
+                        null,
+                        null,
+                        JOB,
+                        1,
+                        "tester",
+                        System.currentTimeMillis(),
+                        false,
+                        params));
     }
 
     private static WebResponse get(JenkinsRule.WebClient wc, JenkinsRule j, String path) throws Exception {
         wc.getOptions().setThrowExceptionOnFailingStatusCode(false);
         // Follow redirects like a real HTTP client: collection nodes emit a trailing-slash 302.
         wc.getOptions().setRedirectEnabled(true);
-        return wc.getPage(new WebRequest(new URL(j.getURL(), path), HttpMethod.GET)).getWebResponse();
+        return wc.getPage(new WebRequest(new URL(j.getURL(), path), HttpMethod.GET))
+                .getWebResponse();
     }
 
     private static int postJson(JenkinsRule.WebClient wc, JenkinsRule j, String path, String body) throws Exception {
         wc.getOptions().setThrowExceptionOnFailingStatusCode(false);
         wc.getOptions().setRedirectEnabled(false);
         WebRequest crumbReq = new WebRequest(new URL(j.getURL(), "crumbIssuer/api/json"), HttpMethod.GET);
-        JSONObject crumb = JSONObject.fromObject(wc.getPage(crumbReq).getWebResponse().getContentAsString());
+        JSONObject crumb =
+                JSONObject.fromObject(wc.getPage(crumbReq).getWebResponse().getContentAsString());
         WebRequest req = new WebRequest(new URL(j.getURL(), path), HttpMethod.POST);
         req.setAdditionalHeader(crumb.getString("crumbRequestField"), crumb.getString("crumb"));
         req.setAdditionalHeader("Content-Type", "application/json");

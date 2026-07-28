@@ -58,8 +58,19 @@ class DesignLibraryUiJsTest {
                 new TextParameterDefinition("notes", "", "free notes"));
         QuestionStore.get()
                 .submit(new Question(
-                        "dlp1", "Provide inputs", null, false, 0L, null, null, p.getFullName(), b.getNumber(), null,
-                        System.currentTimeMillis(), false, params));
+                        "dlp1",
+                        "Provide inputs",
+                        null,
+                        false,
+                        0L,
+                        null,
+                        null,
+                        p.getFullName(),
+                        b.getNumber(),
+                        null,
+                        System.currentTimeMillis(),
+                        false,
+                        params));
 
         try (JenkinsRule.WebClient wc = jsClient(j)) {
             HtmlPage page = wc.goTo("job/dl-params/interactive-input/");
@@ -94,8 +105,18 @@ class DesignLibraryUiJsTest {
         FreeStyleBuild b = j.buildAndAssertSuccess(p);
         QuestionStore.get()
                 .submit(new Question(
-                        "dls1", "Approve deploy?", List.of(new Choice("yes", "Yes")), false, 600_000L, null, null,
-                        p.getFullName(), b.getNumber(), null, System.currentTimeMillis(), false));
+                        "dls1",
+                        "Approve deploy?",
+                        List.of(new Choice("yes", "Yes")),
+                        false,
+                        600_000L,
+                        null,
+                        null,
+                        p.getFullName(),
+                        b.getNumber(),
+                        null,
+                        System.currentTimeMillis(),
+                        false));
 
         try (JenkinsRule.WebClient wc = jsClient(j)) {
             HtmlPage page = wc.goTo("job/dl-sla/interactive-input/");

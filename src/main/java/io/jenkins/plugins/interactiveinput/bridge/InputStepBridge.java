@@ -169,14 +169,17 @@ public class InputStepBridge {
     }
 
     private void mirror(
-            @NonNull QuestionStore store, @NonNull Run<?, ?> run, @NonNull InputStepExecution ise, @NonNull String qid) {
+            @NonNull QuestionStore store,
+            @NonNull Run<?, ?> run,
+            @NonNull InputStepExecution ise,
+            @NonNull String qid) {
         InputStep input = ise.getInput();
-        boolean hasParams = input.getParameters() != null && !input.getParameters().isEmpty();
+        boolean hasParams =
+                input.getParameters() != null && !input.getParameters().isEmpty();
         List<Choice> choices = new ArrayList<>();
         String contextMd = null;
         if (hasParams) {
-            contextMd = "This input needs parameters. [Open the build](" + buildInputUrl(run)
-                    + ") to answer it fully.";
+            contextMd = "This input needs parameters. [Open the build](" + buildInputUrl(run) + ") to answer it fully.";
         } else {
             choices.add(QuestionStore.choice(PROCEED_CHOICE_ID, "Approve / Proceed", "Resume the paused input step"));
         }

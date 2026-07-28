@@ -92,8 +92,8 @@ public class AskInteractiveStepExecution extends AbstractStepExecutionImpl {
             // page, which auto-opens the same dialog. The leading "/" is resolved against the context path
             // by HyperlinkNote (verified against core); the audit page is Item.READ-gated and answering
             // stays permission-checked server-side.
-            String target = "/" + run.getUrl() + InteractiveInputRunAction.URL_NAME + "/?open="
-                    + Util.rawEncode(questionId);
+            String target =
+                    "/" + run.getUrl() + InteractiveInputRunAction.URL_NAME + "/?open=" + Util.rawEncode(questionId);
             String link = OpenInteractiveInputNote.encodeTo(target, questionId, "Open interactive input");
             listener.getLogger().println(LOG_PREFIX + step.getPrompt() + " — waiting for a human answer. " + link);
         }
@@ -117,7 +117,8 @@ public class AskInteractiveStepExecution extends AbstractStepExecutionImpl {
                 // the modal's "Deny" resolved through the answer path (onSuccess), so the pipeline silently
                 // continued instead of aborting.
                 String by = q.getAnswer() != null ? q.getAnswer().getAnsweredBy() : "unknown";
-                ctx.onFailure(new FlowInterruptedException(Result.ABORTED, new CauseOfInterruption.UserInterruption(by)));
+                ctx.onFailure(
+                        new FlowInterruptedException(Result.ABORTED, new CauseOfInterruption.UserInterruption(by)));
                 break;
             case EXPIRED:
                 ctx.onFailure(new TimeoutException(

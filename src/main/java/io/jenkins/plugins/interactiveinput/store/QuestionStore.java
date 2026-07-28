@@ -136,8 +136,9 @@ public class QuestionStore {
             q.markAnswered(a);
         }
         save();
-        LOGGER.log(Level.INFO, "question {0} answered by {1} via {2} (choice={3}, freeText={4})",
-                new Object[] {questionId, byUserId, source, choiceId, freeText != null});
+        LOGGER.log(Level.INFO, "question {0} answered by {1} via {2} (choice={3}, freeText={4})", new Object[] {
+            questionId, byUserId, source, choiceId, freeText != null
+        });
         fire(QuestionStatus.ANSWERED, q);
         resolve(q);
         return a;
@@ -692,7 +693,8 @@ public class QuestionStore {
                         break;
                 }
             } catch (RuntimeException x) {
-                LOGGER.log(Level.WARNING, "QuestionStoreListener " + l.getClass().getName() + " threw", x);
+                LOGGER.log(
+                        Level.WARNING, "QuestionStoreListener " + l.getClass().getName() + " threw", x);
             }
         }
     }

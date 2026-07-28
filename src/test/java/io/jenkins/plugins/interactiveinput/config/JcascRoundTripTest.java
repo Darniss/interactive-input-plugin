@@ -35,6 +35,8 @@ class JcascRoundTripTest {
         assertTrue(f.isRestApi());
         assertTrue(f.isInputStepBridge(), "inputStepBridge overridden to true in YAML");
         assertFalse(f.isDashboardTile());
+        assertFalse(f.isInteractiveView(), "interactiveView overridden to false in YAML");
+        assertTrue(f.isInteractiveOutput(), "interactiveOutput stays on (default) in YAML");
         assertEquals(30, cfg.getPolling().getIntervalSeconds());
         assertEquals(5, cfg.getSla().getDefaultMinutes());
         assertEquals(14, cfg.getRetentionDays());
@@ -63,13 +65,15 @@ class JcascRoundTripTest {
         String exported = export();
         assertTrue(exported.contains("interactiveInput"), () -> "export missing symbol:\n" + exported);
         assertTrue(exported.contains("inputStepBridge: true"), () -> "export missing bridge flag:\n" + exported);
+        assertTrue(
+                exported.contains("interactiveView: false"),
+                () -> "export missing interactiveView feature flag:\n" + exported);
         assertTrue(exported.contains("intervalSeconds: 30"), () -> "export missing polling:\n" + exported);
         assertTrue(
                 exported.contains("lockToBuildStarter: true"),
                 () -> "export missing moved authorization flag (should be under interactiveInput):\n" + exported);
         assertTrue(
-                exported.contains("interactiveInputAppearance"),
-                () -> "export missing appearance block:\n" + exported);
+                exported.contains("interactiveInputAppearance"), () -> "export missing appearance block:\n" + exported);
         assertTrue(exported.contains("hand-left"), () -> "export missing configured icon:\n" + exported);
     }
 

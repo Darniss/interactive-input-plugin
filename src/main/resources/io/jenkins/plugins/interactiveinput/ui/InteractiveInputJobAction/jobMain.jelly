@@ -10,6 +10,12 @@
     2. The large inline box — shown only when this job has pending questions AND the operator left the
        box enabled (Appearance -> Interactive Input). Its title/icon pulse slowly (red) to draw the eye.
   Both mount the shared JS widget, which polls the scoped REST endpoint and opens the shared modal.
+
+  Under the experimental job page the inline box is suppressed (it.jobBoxVisibleClassic is false) so
+  nothing of ours renders inside core's "Legacy" card; the action stays reachable via the native "more
+  actions" overflow menu, the global bell, and the dedicated interactive-input/ page. The invisible
+  live-count controller below still renders in both layouts (it draws nothing). Core has no
+  plugin-usable native job-card API in this baseline (WidgetFactory is @Restricted(NoExternalUse)).
 -->
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout">
   <st:adjunct includes="io.jenkins.plugins.interactiveinput.bell"/>
@@ -21,7 +27,7 @@
         data-poll-seconds="${it.pollingIntervalSeconds}"
         data-initial-count="${it.pendingCount}"/>
 
-  <j:if test="${it.jobPageBoxEnabled}">
+  <j:if test="${it.jobBoxVisibleClassic}">
     <!-- The inline box is core's design-library card (<l:card>, since 2.479.1; verified present on the
          2.568 baseline). The configured notification icon is supplied via the documented `controls`
          fragment; bell.css then pulls it to the LEFT of a bold title and pulses the header slowly in red

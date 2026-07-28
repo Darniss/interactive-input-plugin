@@ -285,6 +285,31 @@
 }
 
 /*
+ * Build-history badge for an OPEN interactive review (interactiveView). A small accent-coloured dot
+ * that links straight to the review editor page (not a dialog). Distinct colour from the red question
+ * badge and deliberately calm (no pulse) since a review is less time-critical than a blocked input.
+ * Defined here in the globally-loaded bell.css so the build-history list needs no heavy editor adjunct.
+ */
+.iv-badge {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin: 0 4px;
+  border-radius: 50%;
+  background: var(--accent-color, #4a90d9);
+  vertical-align: middle;
+  cursor: pointer;
+  flex: 0 0 auto;
+  text-decoration: none;
+}
+
+.iv-badge:hover,
+.iv-badge:focus-visible {
+  outline: 2px solid var(--accent-color, #4a90d9);
+  outline-offset: 2px;
+}
+
+/*
  * B5 run-page attention indicator — a native build summary row (summary.jelly) that stays hidden until
  * the build is waiting for input, then reveals with a red "input needed" cue that gently pulses
  * (reusing ii-attn-pulse, the same attention pulse as the build-list badge and the job-page box). The
@@ -334,6 +359,23 @@
 .ii-pill-aborted,
 .ii-pill-expired {
   background: var(--error-color, #d54c53);
+}
+
+/* interactiveView review statuses (shown in the bell "Reviews" section). */
+.ii-pill-open {
+  background: var(--accent-color, #4a90d9);
+}
+
+.ii-pill-approved {
+  background: var(--success-color, #3a9d5d);
+}
+
+.ii-pill-rejected {
+  background: var(--error-color, #d54c53);
+}
+
+.ii-pill-acknowledged {
+  background: var(--text-color-secondary, #6a6a6a);
 }
 
 .ii-sub-by {
@@ -694,4 +736,79 @@
 .ii-pip:focus-visible {
   outline: 2px solid var(--focus-input-border, #4a90d9);
   outline-offset: 2px;
+}
+
+/* ---- interactiveOutput: KPI cards / report table (shared) ----
+ * These classes are shared by the build main-page summary (summary.jelly, which cannot load its own
+ * adjunct mid-table) and by the dedicated output/trend pages. They live here because bell.css is loaded
+ * globally by the NotificationBell page decorator, so the build summary is styled without a per-page
+ * adjunct. All colours use Jenkins theme variables so light/dark both look native.
+ */
+.io-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.io-report-title {
+  font-weight: 600;
+  color: var(--text-color, #2b2b2b);
+  margin-bottom: 8px;
+}
+
+.io-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.io-card {
+  min-width: 120px;
+  padding: 10px 14px;
+  border: 1px solid var(--input-border, rgba(128, 128, 128, 0.25));
+  border-radius: 8px;
+  background: var(--panel-header-bg-color, rgba(128, 128, 128, 0.06));
+}
+
+.io-cards-lg .io-card {
+  min-width: 150px;
+  padding: 14px 18px;
+}
+
+.io-card-value {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text-color, #2b2b2b);
+  font-variant-numeric: tabular-nums;
+}
+
+.io-cards-lg .io-card-value {
+  font-size: 26px;
+}
+
+.io-unit {
+  font-size: 0.7em;
+  font-weight: 600;
+  color: var(--text-color-secondary, #8a8a8a);
+}
+
+.io-card-label {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-color-secondary, #8a8a8a);
+}
+
+.io-table {
+  margin-top: 12px;
+}
+
+.io-more {
+  color: var(--link-color, var(--accent-color, #4a90d9));
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.io-more:hover {
+  text-decoration: underline;
 }

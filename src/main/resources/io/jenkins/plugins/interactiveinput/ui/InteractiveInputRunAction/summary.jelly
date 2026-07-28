@@ -8,6 +8,10 @@
   bell.js is already loaded on every page for Overall/Read viewers via the NotificationBell page
   decorator (header.jelly), so this file adds NO adjunct of its own (a <script> is not valid mid-table).
 
+  Under the experimental build page this row is suppressed (it.classicSummaryVisible is false): the same
+  "input needed" prompt is rendered natively on the run overview by InteractiveInputRunTab/widget.jelly
+  instead, so nothing of ours lands in core's "Legacy" card. The classic layout still shows this row.
+
   This renders the attention indicator — a native summary row (matching core's <t:summary> markup) shown
   only when the operator ticked "alert user on run page" in Configure. It starts hidden via jenkins-hidden
   unless the build is already waiting, so bell.js can reveal/hide it live as the scoped waiting count
@@ -19,7 +23,7 @@
   every run sub-page, which this main-page-only summary cannot.
 -->
 <j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
-  <j:if test="${it.runAlertEnabled}">
+  <j:if test="${it.classicSummaryVisible}">
     <j:set var="iiRunBoxHidden" value="${it.waiting ? '' : 'jenkins-hidden'}"/>
     <tr class="app-summary ii-runbox-row ${iiRunBoxHidden}">
       <td>

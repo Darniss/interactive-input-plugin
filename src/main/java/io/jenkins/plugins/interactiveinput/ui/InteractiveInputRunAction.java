@@ -97,6 +97,15 @@ public class InteractiveInputRunAction implements BuildBadgeAction {
         return InteractiveInputRunPageAlertJobProperty.isEnabledOn(run.getParent());
     }
 
+    /**
+     * @return whether the classic {@code summary.jelly} attention row should render. Suppressed under
+     *     the experimental build page, where the prompt is shown natively by {@link InteractiveInputRunTab}
+     *     (avoiding a duplicate inside core's "Legacy" card).
+     */
+    public boolean isClassicSummaryVisible() {
+        return isRunAlertEnabled() && !ExperimentalLayout.newBuildPage();
+    }
+
     @Override
     @CheckForNull
     public String getIconFileName() {

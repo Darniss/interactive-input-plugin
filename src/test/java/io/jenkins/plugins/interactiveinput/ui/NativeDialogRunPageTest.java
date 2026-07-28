@@ -170,8 +170,9 @@ class NativeDialogRunPageTest {
             // B26 + rename: the reject controls give the answerer both outcomes — a destructive Deny and a
             // neutral Skip (was "Continue"; now returns the "__skip__" marker to match its label).
             List<DomNode> buttons = page.querySelectorAll("dialog.ii-dialog .ii-actions button");
-            Set<String> labels =
-                    buttons.stream().map(n -> ((HtmlElement) n).asNormalizedText().trim()).collect(Collectors.toSet());
+            Set<String> labels = buttons.stream()
+                    .map(n -> ((HtmlElement) n).asNormalizedText().trim())
+                    .collect(Collectors.toSet());
             assertTrue(labels.contains("Answer"), () -> "buttons=" + labels);
             assertTrue(labels.contains("Skip"), () -> "buttons=" + labels);
             assertTrue(labels.contains("Deny"), () -> "buttons=" + labels);

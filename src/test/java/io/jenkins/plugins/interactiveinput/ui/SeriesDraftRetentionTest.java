@@ -49,8 +49,10 @@ class SeriesDraftRetentionTest {
         long now = System.currentTimeMillis();
         // Two free-text questions (no starter => visible/answerable to everyone) on the SAME build, so the
         // build badge opens the series pager and every slide shows a textarea.
-        store.submit(new Question("s1", "Deploy note (free text)?", List.of(), true, 0L, null, null, JOB, 1, null, now, false));
-        store.submit(new Question("s2", "Rollback note (free text)?", List.of(), true, 0L, null, null, JOB, 1, null, now, false));
+        store.submit(new Question(
+                "s1", "Deploy note (free text)?", List.of(), true, 0L, null, null, JOB, 1, null, now, false));
+        store.submit(new Question(
+                "s2", "Rollback note (free text)?", List.of(), true, 0L, null, null, JOB, 1, null, now, false));
 
         try (JenkinsRule.WebClient wc = j.createWebClient()) {
             wc.getOptions().setJavaScriptEnabled(true);

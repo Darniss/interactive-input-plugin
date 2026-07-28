@@ -91,7 +91,9 @@ class InputStepBridgeTest {
         assertTrue(q.getChoices().isEmpty(), "a parameterized native input must be mirrored with no choices");
         assertFalse(q.isAllowFreeText(), "a parameterized native input mirror offers no free text either");
         assertNotNull(q.getContextMd(), "the mirror must explain how to answer a parameterized input");
-        assertTrue(q.getContextMd().contains("input/"), "context must link to the build's input page: " + q.getContextMd());
+        assertTrue(
+                q.getContextMd().contains("input/"),
+                "context must link to the build's input page: " + q.getContextMd());
 
         // Clean up the still-pending native input to end the build.
         b.getAction(InputAction.class).getExecutions().get(0).doAbort();
@@ -160,8 +162,7 @@ class InputStepBridgeTest {
         enableBridge(false);
         bridge.sync();
         assertTrue(
-                store.listAll().stream().noneMatch(Question::isBridged),
-                "disabling the bridge must drop all mirrors");
+                store.listAll().stream().noneMatch(Question::isBridged), "disabling the bridge must drop all mirrors");
 
         // The underlying native input must be untouched (still pending); clean it up to end the build.
         InputStepExecution ise = b.getAction(InputAction.class).getExecutions().get(0);

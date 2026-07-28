@@ -33,7 +33,10 @@
       <f:description>
         The large "Interactive Input" box shown on a pipeline/job page while it has a pending
         question. Turn this off to keep the badge and sidebar page without the big box. On by
-        default. (Requires the per-project notification centre above.)
+        default. (Requires the per-project notification centre above.) This box applies to the
+        classic job layout; in the experimental job-page layout it is not shown (Jenkins core has no
+        native job-card slot there), but the pending count still appears via the header bell, the
+        "more actions" menu, and the Interactive Input page.
       </f:description>
     </f:entry>
 

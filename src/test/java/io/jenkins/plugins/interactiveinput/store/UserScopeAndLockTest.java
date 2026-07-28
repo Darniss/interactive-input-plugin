@@ -127,8 +127,18 @@ class UserScopeAndLockTest {
 
     private static Question question(String id, int build, String startedBy) {
         return new Question(
-                id, "prompt", List.of(new Choice("a", "A")), false, 0L, null, null, JOB, build, startedBy,
-                System.currentTimeMillis(), false);
+                id,
+                "prompt",
+                List.of(new Choice("a", "A")),
+                false,
+                0L,
+                null,
+                null,
+                JOB,
+                build,
+                startedBy,
+                System.currentTimeMillis(),
+                false);
     }
 
     @FunctionalInterface

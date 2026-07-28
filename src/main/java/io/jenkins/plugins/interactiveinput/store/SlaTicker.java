@@ -5,6 +5,7 @@ import hudson.model.AsyncPeriodicWork;
 import hudson.model.TaskListener;
 import io.jenkins.plugins.interactiveinput.bridge.InputStepBridge;
 import io.jenkins.plugins.interactiveinput.config.InteractiveInputGlobalConfig;
+import io.jenkins.plugins.interactiveinput.view.ViewStore;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -42,6 +43,16 @@ public class SlaTicker extends AsyncPeriodicWork {
         store.expireOverdue(now);
         long retentionMs = TimeUnit.DAYS.toMillis(InteractiveInputGlobalConfig.retentionDaysOrDefault());
         store.compact(now, retentionMs);
+        // The interactive-view store shares the same SLA-expiry + retention cadence: expire overdue
+        // blocking reviews and compact decided ones. Isolated in its own try so a review-store fault
+        // never blocks question expiry or the bridge below.
+        try {
+            ViewStore views = ViewStore.get();
+            views.expireOverdue(now);
+            views.compact(now, retentionMs);
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "interactive-view store maintenance failed", e);
+        }
         try {
             InputStepBridge.get().sync();
         } catch (RuntimeException e) {

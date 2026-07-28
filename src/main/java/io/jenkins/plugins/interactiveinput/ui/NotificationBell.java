@@ -7,6 +7,7 @@ import hudson.model.Run;
 import io.jenkins.plugins.interactiveinput.config.InteractiveInputAppearanceConfig;
 import io.jenkins.plugins.interactiveinput.config.InteractiveInputGlobalConfig;
 import io.jenkins.plugins.interactiveinput.store.QuestionStore;
+import io.jenkins.plugins.interactiveinput.view.ViewStore;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import jenkins.model.Jenkins;
@@ -74,9 +75,7 @@ public class NotificationBell extends PageDecorator {
         try {
             QuestionStore store = QuestionStore.get();
             String jobFullName = getCurrentJobFullName();
-            return jobFullName.isEmpty()
-                    ? store.countNotifications()
-                    : store.countNotificationsForJob(jobFullName);
+            return jobFullName.isEmpty() ? store.countNotifications() : store.countNotificationsForJob(jobFullName);
         } catch (RuntimeException e) {
             LOGGER.log(Level.FINE, "could not compute initial bell count", e);
             return 0;
@@ -138,9 +137,49 @@ public class NotificationBell extends PageDecorator {
             return 0;
         }
         try {
-            return QuestionStore.get().countNotificationsForBuild(run.getParent().getFullName(), run.getNumber());
+            return QuestionStore.get()
+                    .countNotificationsForBuild(run.getParent().getFullName(), run.getNumber());
         } catch (RuntimeException e) {
             LOGGER.log(Level.FINE, "could not compute run-page pending count", e);
+            return 0;
+        }
+    }
+
+    /**
+     * @return {@code true} when the run-scoped <em>Interactive View</em> controller should render:
+     *     the per-project centre and the {@code interactiveView} feature are on, the page is under a
+     *     build, and that build has at least one review document. Mirrors {@code InteractiveViewRunAction}'s
+     *     attach condition so the sidebar "Interactive View" link's count stays live on every run sub-page.
+     */
+    public boolean isRunViewContextActive() {
+        if (!InteractiveInputAppearanceConfig.perProjectCentreEnabled()
+                || !InteractiveInputGlobalConfig.featuresOrDefault().isInteractiveView()) {
+            return false;
+        }
+        Run<?, ?> run = currentRun();
+        if (run == null) {
+            return false;
+        }
+        try {
+            return ViewStore.get().hasAnyForBuild(run.getParent().getFullName(), run.getNumber());
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.FINE, "could not evaluate run context for interactive-view surfaces", e);
+            return false;
+        }
+    }
+
+    /** @return the open-review count scoped to the current build for the view sidebar badge's initial render. */
+    public int getCurrentRunViewPendingCount() {
+        Run<?, ?> run = currentRun();
+        if (run == null) {
+            return 0;
+        }
+        try {
+            // Notification-scoped (OPEN + notify + readable, honouring the user-scope switch) so the
+            // view sidebar badge matches the bell and the "own build's notifications" setting.
+            return ViewStore.get().countNotificationsForBuild(run.getParent().getFullName(), run.getNumber());
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.FINE, "could not compute run-page view pending count", e);
             return 0;
         }
     }

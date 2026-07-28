@@ -24,12 +24,12 @@ import jenkins.model.TransientActionFactory;
  *       questions (rendered by {@code WorkflowJob/main.jelly} and {@code AbstractProject/main.jelly}
  *       which iterate {@code allActions} and include each action's {@code jobMain.jelly}). It
  *       self-hides when nothing is pending.</li>
-     *   <li>{@code index.jelly} — the action's own page (reached via the left-sidebar link that appears
-     *       only when there are pending questions, driven by {@link #getIconFileName()}). While showing,
-     *       its pending count is kept live client-side by the always-present {@code data-ii-tasklink}
-     *       controller in {@code jobMain.jelly} (see {@code bell.js}) — rendered as a native
-     *       {@code jenkins-badge} pill next to the label rather than "{@code (N)}" text — so it no longer
-     *       goes stale until a page reload.</li>
+ *   <li>{@code index.jelly} — the action's own page (reached via the left-sidebar link that appears
+ *       only when there are pending questions, driven by {@link #getIconFileName()}). While showing,
+ *       its pending count is kept live client-side by the always-present {@code data-ii-tasklink}
+ *       controller in {@code jobMain.jelly} (see {@code bell.js}) — rendered as a native
+ *       {@code jenkins-badge} pill next to the label rather than "{@code (N)}" text — so it no longer
+ *       goes stale until a page reload.</li>
  * </ul>
  *
  * <p>Both surfaces mount the shared JS widget, which polls the scoped REST endpoint
@@ -56,6 +56,17 @@ public class InteractiveInputJobAction implements Action {
     /** @return whether the large inline job-page box is enabled (independent of the sidebar/badge). */
     public boolean isJobPageBoxEnabled() {
         return InteractiveInputAppearanceConfig.jobPageBoxEnabled();
+    }
+
+    /**
+     * @return whether the inline job-page box should render. Suppressed under the experimental job page,
+     *     where core wraps {@code jobMain.jelly} in its "Legacy" card and there is no plugin-usable
+     *     native-card API ({@code WidgetFactory} is {@code @Restricted(NoExternalUse)}). The action stays
+     *     reachable there via the native "more actions" overflow menu, the global bell, and the dedicated
+     *     {@code interactive-input/} page. The classic layout is unchanged.
+     */
+    public boolean isJobBoxVisibleClassic() {
+        return isJobPageBoxEnabled() && !ExperimentalLayout.newJobPage();
     }
 
     /** @return the theme-aware symbol class for the configured notification icon. */
@@ -106,13 +117,19 @@ public class InteractiveInputJobAction implements Action {
         return enabled() && getPendingCount() > 0 ? getIconClassName() : null;
     }
 
+    /**
+     * @return "Interactive Input", suffixed with the pending count {@code (N)} when there is at least one
+     *     pending question. This surfaces the count in the experimental "more actions" overflow menu, which
+     *     is server-rendered from the display name (core exposes no styled-badge slot there). In the classic
+     *     sidebar {@code bell.js} ({@code mountTaskLink}) resets the label to plain "Interactive Input" and
+     *     shows the count as a live {@code jenkins-badge} pill instead, so there is no double count. Mirrors
+     *     {@link InteractiveViewJobAction#getDisplayName()}.
+     */
     @Override
     @NonNull
     public String getDisplayName() {
-        // The pending count is shown as a native jenkins-badge pill added client-side (see bell.js
-        // mountTaskLink), not baked into the label text, so the sidebar link matches Jenkins
-        // conventions (e.g. the "Updates N" badge on the Plugins page).
-        return "Interactive Input";
+        int n = getPendingCount();
+        return n > 0 ? "Interactive Input (" + n + ")" : "Interactive Input";
     }
 
     @Override

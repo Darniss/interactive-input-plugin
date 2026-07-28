@@ -41,6 +41,23 @@
     </f:description>
   </f:entry>
 
+  <f:entry>
+    <f:checkbox field="interactiveView" title="interactiveView review surfaces" default="true"/>
+    <f:description>
+      The interactiveView step and its Confluence-style review page (comment / edit copy / approve),
+      sidebar link, build badge, bell "Reviews" section and REST endpoints. On by default; surfaces only
+      appear when the step is actually called.
+    </f:description>
+  </f:entry>
+
+  <f:entry>
+    <f:checkbox field="interactiveOutput" title="interactiveOutput statistics surfaces" default="true"/>
+    <f:description>
+      The interactiveOutput step and its per-build KPI cards / table plus the per-job trend chart. On by
+      default; surfaces only appear when the step is actually called.
+    </f:description>
+  </f:entry>
+
   <!--
     The "Dashboard tile" (dashboardTile) feature is not implemented yet, so its toggle is intentionally
     not rendered here (hosting review B19: don't expose UI for unavailable features). The field remains
