@@ -217,6 +217,53 @@
   overflow-x: auto;
 }
 
+/* ---- GFM tables (commonmark TablesExtension) in the rendered document and in comment bodies.
+   The renderer emits a bare <table> with per-column align attributes; core/browser defaults leave it
+   borderless, so style it here (theme-aware). .iv-rendered already scrolls (overflow-x:auto) for wide
+   tables; keep the table a real table so border-collapse and column alignment work. ---- */
+.iv-rendered table,
+.iv-comment-body table {
+  border-collapse: collapse;
+  margin: 12px 0;
+  max-width: 100%;
+  font-size: 0.92em;
+}
+
+.iv-rendered th,
+.iv-rendered td,
+.iv-comment-body th,
+.iv-comment-body td {
+  border: 1px solid var(--input-border, rgba(128, 128, 128, 0.4));
+  padding: 6px 10px;
+  text-align: left; /* GFM default; a per-column :---: alignment is honoured by the overrides below */
+  vertical-align: top;
+}
+
+.iv-rendered th[align="center"],
+.iv-rendered td[align="center"],
+.iv-comment-body th[align="center"],
+.iv-comment-body td[align="center"] {
+  text-align: center;
+}
+
+.iv-rendered th[align="right"],
+.iv-rendered td[align="right"],
+.iv-comment-body th[align="right"],
+.iv-comment-body td[align="right"] {
+  text-align: right;
+}
+
+.iv-rendered thead th,
+.iv-comment-body thead th {
+  background: var(--item-background--hover, rgba(128, 128, 128, 0.1));
+  font-weight: 600;
+}
+
+.iv-rendered tbody tr:nth-child(even),
+.iv-comment-body tbody tr:nth-child(even) {
+  background: var(--item-background--hover, rgba(128, 128, 128, 0.045));
+}
+
 /* ---- rendered-view inline comment anchors (one wrapper per top-level markdown block) ---- */
 .iv-rblock {
   position: relative;
@@ -626,6 +673,16 @@
 .iv-flag-notified {
   color: var(--accent-color, #4a90d9);
   background: var(--item-background--active, rgba(74, 144, 217, 0.16));
+}
+
+/*
+ * "Build deleted" marker on the per-job table: a muted (not alarming) pill shown when a review's owning
+ * build has been removed. The review is kept for its history, so this is informational rather than an
+ * error. Uses a neutral grey with an explicit rgba fallback so it renders under any theme, light or dark.
+ */
+.iv-flag-deleted {
+  color: var(--text-color-secondary, #6b7178);
+  background: rgba(128, 128, 128, 0.16);
 }
 
 .iv-list-title-row {

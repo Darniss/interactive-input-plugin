@@ -112,6 +112,14 @@ public class ReviewDocument implements Serializable {
     /** 1-based index of the latest content version. */
     private int currentVersion;
 
+    /**
+     * {@code true} once the owning build has been deleted. The review is kept as a durable audit record
+     * (its comment/decision history survives the build), but it no longer generates a notification and
+     * the per-job page shows it as "build deleted". XStream-safe: absent in legacy {@code views.xml}, so
+     * it deserialises to {@code false} (the pre-existing "still live" behaviour).
+     */
+    private boolean buildDeleted;
+
     @NonNull
     private final List<ReviewComment> comments = new ArrayList<>();
 
@@ -286,6 +294,15 @@ public class ReviewDocument implements Serializable {
         return currentVersion;
     }
 
+    /**
+     * @return {@code true} if the owning build has been deleted. The review is retained (its history is
+     *     durable) but is excluded from the notification centre and the sidebar/badge counts, and the
+     *     per-job interactive-view page renders it as "build deleted" without a live build link.
+     */
+    public boolean isBuildDeleted() {
+        return buildDeleted;
+    }
+
     /** @return an unmodifiable view of the comments (never {@code null}). */
     @NonNull
     public List<ReviewComment> getComments() {
@@ -348,6 +365,15 @@ public class ReviewDocument implements Serializable {
         this.decidedTs = System.currentTimeMillis();
     }
 
+    /**
+     * Mark the owning build as deleted (idempotent). Invoked by {@link ViewStore} while holding this
+     * document's monitor. Does not change {@link #status}: a decided review stays decided, an open one
+     * stays open — it is simply no longer surfaced as a notification.
+     */
+    void markBuildDeleted() {
+        this.buildDeleted = true;
+    }
+
     /** @return {@code true} if a blocking SLA is configured and it has elapsed relative to {@code now}. */
     public boolean isExpired(long now) {
         return expiresAt > 0 && now >= expiresAt;
@@ -391,6 +417,7 @@ public class ReviewDocument implements Serializable {
         o.put("status", status.name());
         o.put("decidedBy", decidedBy == null ? "" : decidedBy);
         o.put("decidedTs", decidedTs);
+        o.put("buildDeleted", buildDeleted);
         o.put("currentVersion", currentVersion);
         o.put("slaMs", slaMs);
         o.put("expiresAt", expiresAt);

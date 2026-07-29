@@ -44,11 +44,22 @@
                 </tr>
                 <j:forEach var="r" items="${group.value}">
                   <tr data-iv-status="${r.status}" data-iv-mode="${r.mode}" data-iv-notify="${r.notify}"
+                      data-iv-deleted="${it.isBuildDeleted(r)}"
                       data-iv-text="${group.key} ${r.title} ${r.fileName}">
                     <td>
-                      <a href="${rootURL}/${it.job.url}${r.buildNumber}/interactive-view/?doc=${r.id}">${r.title}</a>
+                      <j:choose>
+                        <j:when test="${it.isBuildDeleted(r)}">${r.title}</j:when>
+                        <j:otherwise>
+                          <a href="${rootURL}/${it.job.url}${r.buildNumber}/interactive-view/?doc=${r.id}">${r.title}</a>
+                        </j:otherwise>
+                      </j:choose>
                     </td>
-                    <td>#${r.buildNumber}</td>
+                    <td>
+                      #${r.buildNumber}
+                      <j:if test="${it.isBuildDeleted(r)}">
+                        <span class="iv-flag iv-flag-deleted">build deleted</span>
+                      </j:if>
+                    </td>
                     <td>
                       <j:choose>
                         <j:when test="${r.mode == 'info'}"><span class="iv-tag iv-tag-info">Info</span></j:when>

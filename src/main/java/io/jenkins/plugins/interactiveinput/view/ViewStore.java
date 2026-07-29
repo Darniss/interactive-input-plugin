@@ -386,6 +386,7 @@ public class ViewStore {
             boolean userScoped) {
         return d.getStatus() == ReviewStatus.OPEN
                 && d.isNotify()
+                && !d.isBuildDeleted()
                 && jobFullName.equals(d.getJobFullName())
                 && d.getBuildNumber() == buildNumber
                 && canView(d)
@@ -398,7 +399,7 @@ public class ViewStore {
         String uid = currentUserId();
         List<ReviewDocument> out = new ArrayList<>();
         for (ReviewDocument d : docs.values()) {
-            if (d.getStatus() != ReviewStatus.OPEN || !d.isNotify()) {
+            if (d.getStatus() != ReviewStatus.OPEN || !d.isNotify() || d.isBuildDeleted()) {
                 continue;
             }
             if (jobFullName != null && !jobFullName.equals(d.getJobFullName())) {
@@ -586,6 +587,72 @@ public class ViewStore {
                 }
             }
         }
+    }
+
+    // ----------------------------------------------------------------------------------------
+    // Build lifecycle (driven by BuildLifecycleCleanup)
+    // ----------------------------------------------------------------------------------------
+
+    /**
+     * Mark every review of a now-deleted build as build-deleted. The reviews are <em>kept</em> as durable
+     * audit records (their comment/decision history outlives the build), but they drop out of the
+     * notification centre and the sidebar/badge counts and the per-job page renders them as "build
+     * deleted". Invoked by the {@code RunListener} when a build is deleted.
+     *
+     * @return the number of reviews newly marked (0 if none matched or all were already marked).
+     */
+    public int markBuildDeletedForBuild(@NonNull String jobFullName, int buildNumber) {
+        int marked = 0;
+        for (ReviewDocument d : docs.values()) {
+            if (!jobFullName.equals(d.getJobFullName()) || d.getBuildNumber() != buildNumber || d.isBuildDeleted()) {
+                continue;
+            }
+            synchronized (d) {
+                if (!d.isBuildDeleted()) {
+                    d.markBuildDeleted();
+                    marked++;
+                }
+            }
+        }
+        if (marked > 0) {
+            save();
+            LOGGER.log(Level.FINE, "marked {0} review(s) build-deleted for {1} #{2}", new Object[] {
+                marked, jobFullName, buildNumber
+            });
+        }
+        return marked;
+    }
+
+    /**
+     * Startup self-heal: mark reviews whose owning build no longer exists (deleted before this cleanup
+     * shipped, or while the controller was down). Only acts when the job still resolves but the build is
+     * gone, so a temporarily-unresolvable job (folder still loading, security, etc.) never loses its
+     * reviews. Invoked once from {@code BuildLifecycleCleanup}'s {@code onLoaded}.
+     *
+     * @return the number of reviews newly marked.
+     */
+    public int reconcileDeletedBuilds() {
+        int marked = 0;
+        for (ReviewDocument d : docs.values()) {
+            if (d.isBuildDeleted()) {
+                continue;
+            }
+            Job<?, ?> job = findJob(d);
+            if (job == null || job.getBuildByNumber(d.getBuildNumber()) != null) {
+                continue;
+            }
+            synchronized (d) {
+                if (!d.isBuildDeleted()) {
+                    d.markBuildDeleted();
+                    marked++;
+                }
+            }
+        }
+        if (marked > 0) {
+            save();
+            LOGGER.log(Level.INFO, "reconciled {0} review(s) whose owning build was deleted", marked);
+        }
+        return marked;
     }
 
     // ----------------------------------------------------------------------------------------

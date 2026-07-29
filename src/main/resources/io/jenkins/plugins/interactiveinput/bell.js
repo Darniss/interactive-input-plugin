@@ -305,6 +305,11 @@
     meta.appendChild(statusPill(v.status));
     meta.appendChild(el("span", { text: " " + v.jobFullName + " #" + v.buildNumber }));
     link.appendChild(meta);
+    // Attribute the review to whoever started the triggering build, mirroring the question rows above
+    // (the server sets createdBy from the build's cause, so it reads "started by <user|scm|timer|…>").
+    if (v.createdBy) {
+      link.appendChild(el("span", { cls: "ii-item-by", text: "started by " + v.createdBy }));
+    }
     const c = v.commentCount || 0;
     link.appendChild(el("span", { cls: "ii-item-by", text: c + " comment" + (c === 1 ? "" : "s") }));
     link.addEventListener("click", onClick);

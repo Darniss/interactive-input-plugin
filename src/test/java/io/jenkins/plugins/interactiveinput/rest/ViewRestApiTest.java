@@ -48,6 +48,21 @@ class ViewRestApiTest {
     }
 
     @Test
+    void summaryJsonCarriesStarterAndBuildDeletedFlag(JenkinsRule j) throws Exception {
+        secure(j);
+        seed("v1", ReviewDocument.FORMAT_TEXT, "text", true, false);
+
+        WebResponse resp = get(j.createWebClient().login("reader"), j, BASE + "views");
+        assertEquals(200, resp.getStatusCode());
+        JSONArray views = json(resp).getJSONArray("views");
+        assertEquals(1, views.size());
+        JSONObject v = views.getJSONObject(0);
+        // createdBy is set server-side from the build cause; the bell renders it as "started by <user>".
+        assertEquals("tester", v.getString("createdBy"), "the review's starter is exposed for the bell label");
+        assertFalse(v.getBoolean("buildDeleted"), "a live review is not build-deleted");
+    }
+
+    @Test
     void detailIsHiddenWithoutItemRead(JenkinsRule j) throws Exception {
         secure(j);
         seed("v1", ReviewDocument.FORMAT_TEXT, "text", true, false);
@@ -233,6 +248,26 @@ class ViewRestApiTest {
         // comments on the RENDERED view too (line 1 = heading, line 3 = paragraph after the blank line).
         assertTrue(html.contains("data-source-line=\"1\""), "heading must anchor to source line 1: " + html);
         assertTrue(html.contains("data-source-line=\"3\""), "paragraph must anchor to source line 3: " + html);
+    }
+
+    @Test
+    void markdownTablesRenderToHtmlTableEndToEnd(JenkinsRule j) throws Exception {
+        secure(j);
+        // The exact class of content that regressed in the live Interactive View: a GFM pipe table in a
+        // markdown review must reach the client as an HTML <table>, not a literal "|"-delimited paragraph.
+        seed(
+                "tbl",
+                ReviewDocument.FORMAT_MARKDOWN,
+                "# Report\n\n| Aspect | Value |\n|---|---|\n| length | 1..255 |",
+                true,
+                false);
+
+        JSONObject detail = json(get(j.createWebClient().login("builder"), j, BASE + "views/tbl"));
+        String html = detail.getString("renderedHtml");
+        // The document body uses the source-line renderer, so the table opens as <table data-source-line=..>.
+        assertTrue(html.contains("<table"), "a GFM pipe table must render as an HTML table: " + html);
+        assertTrue(html.contains("<th>Aspect</th>"), "table header cells must render: " + html);
+        assertFalse(html.contains("|---|"), "the delimiter row must not leak through as literal text: " + html);
     }
 
     @Test

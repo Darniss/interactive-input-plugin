@@ -110,6 +110,17 @@ public class InteractiveViewJobAction implements Action {
         }
     }
 
+    /**
+     * @return {@code true} if the review's owning build has been deleted. The per-job page keeps listing
+     *     such reviews (their comment/decision history is durable) but marks them "build deleted" and
+     *     drops the link to the — now absent — per-build review editor. Called per row from
+     *     {@code index.jelly}. The flag is set by {@code BuildLifecycleCleanup} on deletion (and by its
+     *     startup reconcile for builds deleted earlier), so no live build lookup is needed here.
+     */
+    public boolean isBuildDeleted(@NonNull ReviewDocument r) {
+        return r.isBuildDeleted();
+    }
+
     public int getPollingIntervalSeconds() {
         return InteractiveInputGlobalConfig.pollingIntervalSecondsOrDefault();
     }

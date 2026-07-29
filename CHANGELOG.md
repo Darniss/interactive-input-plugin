@@ -168,6 +168,11 @@ All notable changes to this project are documented here. The format follows
   Appearance switch.
 
 ### Changed
+- **Interactive View bell notifications now show "started by &lt;user&gt;" like question rows do.** The
+  header-bell review row (`bell.js` `viewListItem`) previously showed only the comment count. The build
+  starter is already carried on the review (`ReviewDocument.createdBy`, resolved via `CauseResolver` and
+  present in the summary JSON), so the row now renders the same `ii-item-by` attribution used for
+  `askInteractive` questions — no server change was required.
 - **Under the experimental layout, our UI now renders natively instead of inside the "Legacy" card.**
   The experimental build page routes every action's `summary.jelly` into a hardcoded core "Legacy"
   card; previously our per-build Interactive Output KPIs and Interactive Input attention row landed
@@ -229,6 +234,31 @@ All notable changes to this project are documented here. The format follows
   longer stays stale until a full page reload.
 
 ### Fixed
+- **Interactive View now renders GitHub-Flavored Markdown — tables, strikethrough and autolinks.**
+  Observed failure: a markdown review containing a pipe table rendered as a literal `|`-delimited
+  paragraph in the document viewer (and likewise in the `askInteractive` modal context panel), rather
+  than an HTML `<table>`. Root cause: `MarkdownRenderer` built its commonmark `Parser`/`HtmlRenderer`
+  with **no extensions**, and GFM tables/strikethrough/autolinks are not part of the CommonMark core
+  spec. Fix: register `TablesExtension`, `StrikethroughExtension` and `AutolinkExtension` on every
+  parser/renderer (both the plain and the source-line variants). The extensions ship with the
+  `markdown-formatter` plugin dependency, so no extra jar is bundled, and the existing
+  `escapeHtml`/`sanitizeUrls` safeguards still apply to their output (a `<script>` in a table cell stays
+  escaped, `javascript:` autolinks stay sanitised). The emitted `<table>` is styled theme-aware
+  (borders, header shading, zebra rows, per-column alignment) in the document viewer (`viewer.css`) and
+  the modal/free-text preview (`bell.css`). Task-list items remain unsupported (that extension is not
+  shipped by `markdown-formatter`, and bundling a standalone jar would break the packaging convention).
+- **Deleting a build now clears its interactive notifications and marks its review page.** Observed
+  failure: after a build was deleted, its `askInteractive` question and its Interactive View review
+  still counted toward the header-bell total and the sidebar badge, and the per-job Interactive View
+  page kept a live link to the now-missing build. Root cause: nothing observed build/run deletion, and
+  the notification predicates in `QuestionStore`/`ViewStore` only checked that the *job* still existed,
+  never the *build*. Fix (`store/BuildLifecycleCleanup`): a `RunListener#onDeleted` purges that build's
+  questions (`QuestionStore#removeForBuild`) and flags its reviews `buildDeleted`
+  (`ViewStore#markBuildDeletedForBuild`) so they drop out of both notification queries while the review
+  record is retained as history; an `ItemListener#onLoaded` reconcile self-heals orphans left by builds
+  deleted before this release (`reconcileDeletedBuilds`). The per-job page (`InteractiveViewJobAction`
+  + `index.jelly`) now renders a *build deleted* pill and drops the dead per-build link. The flag is a
+  cheap boolean read on the poll hot-path (no per-notification `getBuildByNumber` lookup).
 - **`interactiveView` / `interactiveOutput` now default *on* after an upgrade.** Found during live
   validation on 2.568.1: a controller that already had a saved System config (from a build predating
   these two flags) loaded them as `false`, silently hiding the new surfaces. XStream instantiates the

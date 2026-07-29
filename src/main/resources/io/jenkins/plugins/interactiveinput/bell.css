@@ -452,6 +452,46 @@
   margin-top: 0;
 }
 
+/* ---- GFM tables (commonmark TablesExtension) in the modal's context panel and free-text preview.
+   MarkdownRenderer emits a bare <table>; style it theme-aware so it isn't a borderless block. ---- */
+.ii-context-body table,
+.ii-preview table {
+  border-collapse: collapse;
+  margin: 10px 0;
+  max-width: 100%;
+  font-size: 0.95em;
+}
+
+.ii-context-body th,
+.ii-context-body td,
+.ii-preview th,
+.ii-preview td {
+  border: 1px solid var(--input-border, rgba(128, 128, 128, 0.4));
+  padding: 5px 9px;
+  text-align: left; /* GFM default; per-column :---: alignment honoured by the overrides below */
+  vertical-align: top;
+}
+
+.ii-context-body th[align="center"],
+.ii-context-body td[align="center"],
+.ii-preview th[align="center"],
+.ii-preview td[align="center"] {
+  text-align: center;
+}
+
+.ii-context-body th[align="right"],
+.ii-context-body td[align="right"],
+.ii-preview th[align="right"],
+.ii-preview td[align="right"] {
+  text-align: right;
+}
+
+.ii-context-body thead th,
+.ii-preview thead th {
+  background: var(--item-background--hover, rgba(128, 128, 128, 0.1));
+  font-weight: 600;
+}
+
 .ii-choices {
   border: 0;
   margin: 0 0 14px;

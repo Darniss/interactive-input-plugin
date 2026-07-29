@@ -621,6 +621,61 @@ public class QuestionStore {
     }
 
     // ----------------------------------------------------------------------------------------
+    // Build lifecycle (driven by BuildLifecycleCleanup)
+    // ----------------------------------------------------------------------------------------
+
+    /**
+     * Purge every question of a now-deleted build (any status). A question is meaningful only alongside
+     * its build — its audit trail lives on the build page, which is gone — so on build deletion its
+     * questions are removed outright, clearing them from the notification centre and the sidebar/badge
+     * counts. Invoked by the {@code RunListener} when a build is deleted.
+     *
+     * @return the number of questions removed.
+     */
+    public int removeForBuild(@NonNull String jobFullName, int buildNumber) {
+        int removed = 0;
+        for (Question q : new ArrayList<>(questions.values())) {
+            if (jobFullName.equals(q.getJobFullName()) && q.getBuildNumber() == buildNumber) {
+                questions.remove(q.getId());
+                resolvers.remove(q.getId());
+                removed++;
+            }
+        }
+        if (removed > 0) {
+            save();
+            LOGGER.log(Level.FINE, "removed {0} question(s) for deleted build {1} #{2}", new Object[] {
+                removed, jobFullName, buildNumber
+            });
+        }
+        return removed;
+    }
+
+    /**
+     * Startup self-heal: purge questions whose owning build no longer exists (deleted before this cleanup
+     * shipped, or while the controller was down). Only acts when the job still resolves but the build is
+     * gone, so a temporarily-unresolvable job never loses its questions. Invoked once from
+     * {@code BuildLifecycleCleanup}'s {@code onLoaded}.
+     *
+     * @return the number of questions removed.
+     */
+    public int reconcileDeletedBuilds() {
+        int removed = 0;
+        for (Question q : new ArrayList<>(questions.values())) {
+            Job<?, ?> job = findJob(q);
+            if (job != null && job.getBuildByNumber(q.getBuildNumber()) == null) {
+                questions.remove(q.getId());
+                resolvers.remove(q.getId());
+                removed++;
+            }
+        }
+        if (removed > 0) {
+            save();
+            LOGGER.log(Level.INFO, "reconciled {0} question(s) whose owning build was deleted", removed);
+        }
+        return removed;
+    }
+
+    // ----------------------------------------------------------------------------------------
     // Persistence
     // ----------------------------------------------------------------------------------------
 
