@@ -777,3 +777,88 @@
 .iv-code .token.deleted {
   color: var(--error-color, #d54c53);
 }
+
+/* ---- experimental run-overview card (InteractiveViewRunTab/widget.jelly) ---- */
+.iv-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Lists all of the build's reviews but caps the visible height to ~10 compact rows and scrolls the
+   rest; the "View all reviews" link (.iv-more) stays pinned below, outside this scroll area. */
+.iv-overview-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 24rem;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.iv-overview-group-head {
+  font-weight: 600;
+  color: var(--text-color, #2b2b2b);
+  margin-bottom: 6px;
+}
+
+.iv-overview-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--input-border, rgba(128, 128, 128, 0.18));
+}
+
+.iv-overview-row:last-child {
+  border-bottom: 0;
+}
+
+/* Title (link) stacked over the muted file name; takes the remaining row width and truncates. */
+.iv-overview-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.iv-overview-file {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--link-color, var(--accent-color, #4a90d9));
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.iv-overview-file:hover {
+  text-decoration: underline;
+}
+
+.iv-overview-doc {
+  font-size: 12px;
+  color: var(--text-color-secondary, #8a8a8a);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.iv-overview-comments {
+  font-size: 12px;
+  color: var(--text-color-secondary, #8a8a8a);
+  font-variant-numeric: tabular-nums;
+}
+
+.iv-more {
+  color: var(--link-color, var(--accent-color, #4a90d9));
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.iv-more:hover {
+  text-decoration: underline;
+}

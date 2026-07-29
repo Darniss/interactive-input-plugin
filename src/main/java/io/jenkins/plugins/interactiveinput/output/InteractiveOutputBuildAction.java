@@ -79,7 +79,9 @@ public class InteractiveOutputBuildAction implements RunAction2 {
      *     {@link InteractiveOutputRunTab} (avoiding a duplicate inside core's "Legacy" card).
      */
     public boolean isClassicSummaryVisible() {
-        return isVisible() && !ExperimentalLayout.newBuildPage();
+        return isVisible()
+                && !ExperimentalLayout.newBuildPage()
+                && InteractiveInputAppearanceConfig.outputBuildCardEnabled();
     }
 
     @Override

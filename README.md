@@ -259,8 +259,12 @@ shows a small badge while a review is open, and the job gets a **list page group
 with **Needs‑approval vs Informational** sections, a **Notified** badge, and **All / Notified /
 Needs‑approval** filter chips + search. All of this works in both the classic and experimental job/build
 layouts (light and dark): under the experimental layout the per‑build surfaces render as **native overview
-cards** (not inside core's "Legacy" card), and the pages stay reachable via the native **"more actions"**
-overflow menu. The review surfaces honour the same **System** switches as questions —
+cards** (not inside core's "Legacy" card) — the build page shows a compact **Interactive View** card
+listing that build's reviews (each review's title, its **file name**, status, **Notified** flag, and
+comment count) in a **scrollable** panel (capped at ~10 rows) with a *View all reviews* link pinned below,
+mirroring the Interactive Output card; the report‑name heading is dropped when it would merely repeat a
+lone file's title. Both build‑page cards can be turned off under **Appearance** (`viewBuildCard` /
+`outputBuildCard`), and the pages stay reachable via the native **"more actions"** overflow menu. The review surfaces honour the same **System** switches as questions —
 `userScopedNotifications` (see only your own builds' reviews) and `lockToBuildStarter` (non‑starters may
 view but not contribute) — see [Configuration (UI + JCasC)](#configuration-ui--jcasc).
 
@@ -580,6 +584,8 @@ A visual tour of where to configure the plugin and what it looks like in use. (T
 - **Per-project notification centre** — the per-pipeline / per-build surfaces: a sidebar page on each job, an "awaiting input" badge next to the waiting build in the build-history list, and the per-build audit view. *On by default.*
 - **Show the inline box on the job page** — the large "Interactive Input" box on a job/pipeline page while it has a pending question. Turn it off to keep the badge + sidebar page **without** the big box. *On by default* (requires the per-project centre above).
 - **Show a pending-count badge in the browser tab** — when on (and the header bell above is enabled), the number of questions you can answer is mirrored in the browser tab. If the site favicon is **same-origin**, a small red dot is painted **on top of** it (the tab title is left unchanged); if the favicon is **cross-origin or missing** — a browser cannot read its pixels into a canvas, e.g. a favicon hosted on another domain via the Simple Theme plugin — it falls back to a red-circle + "(N)" prefix on the tab **title**. Either way it never replaces the site favicon. *On by default.*
+- **Show the Interactive View card on the build page** — the compact "Interactive View" card that lists a build's published reviews (with status and comment count) on the **experimental** build-overview page. Turn it off to hide the card and its build-page tab; the dedicated Interactive View page, sidebar link, and build-history badge stay reachable. *On by default.*
+- **Show the Interactive Output card on the build page** — the "Interactive Output" per-build metrics card: the native overview card on the **experimental** build page **and** the summary row on the classic build page. Turn it off to hide both; the dedicated Interactive Output page stays reachable. *On by default.*
 - **Notification icon** — the icon used across the bell, badge, and sidebar link, chosen from seven meaning-matched Ionicons (megaphone *(default)*, speech bubble, raised hand, pull-request, hourglass, alert, classic bell). The capture above is set to **Raised hand — human action needed**.
 
 > The two authorization switches that govern *who* may see and answer a question — **Show each user only their own build's notifications** and **Only the build starter may answer (others can view)** — are functional (not look-and-feel) settings and now live under **Manage Jenkins → System → Interactive Input** (see [Configuration](#configuration-ui--jcasc)).
@@ -608,7 +614,7 @@ This is the **per-build audit view** — the compliance trail for every human-in
 Settings are split in two, following Jenkins core guidance to keep look‑and‑feel out of functional config:
 
 - **Functional flags** — the feature toggles, polling/SLA/retention, and the two **authorization** switches (user‑scoped notifications, lock‑to‑build‑starter) live under **Manage Jenkins → System → Interactive Input** (`unclassified.interactiveInput`).
-- **Notification‑surface visibility** (the global bell + its scoping, the per‑project centre, the job‑page box, the browser‑tab badge, and the icon) lives under **Manage Jenkins → Appearance → Interactive Input** (`appearance.interactiveInputAppearance`).
+- **Notification‑surface visibility** (the global bell + its scoping, the per‑project centre, the job‑page box, the browser‑tab badge, the Interactive View / Interactive Output build‑page cards, and the icon) lives under **Manage Jenkins → Appearance → Interactive Input** (`appearance.interactiveInputAppearance`).
 
 ```yaml
 unclassified:
@@ -638,6 +644,8 @@ appearance:
     perProjectCentre: true             # per-project surfaces (sidebar page, build badge, audit view)
     jobPageBox: true                   # the large inline box on the job page (independent of the badge)
     tabNotificationBadge: true         # mirror the pending count in the browser tab (favicon dot if same-origin, else title)
+    viewBuildCard: true                # Interactive View card on the build page (experimental overview)
+    outputBuildCard: true              # Interactive Output card on the build page (experimental card + classic summary)
     icon: "megaphone"                  # one of: chatbubble-ellipses, hand-left, git-pull-request,
                                        # megaphone, hourglass, alert-circle, notifications
 ```

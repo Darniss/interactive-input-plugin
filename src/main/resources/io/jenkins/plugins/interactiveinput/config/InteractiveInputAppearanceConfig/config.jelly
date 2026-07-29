@@ -1,7 +1,7 @@
 <?jelly escape-by-default='true'?>
 <!--
   Renders under Manage Jenkins -> Appearance -> "Interactive Input" (this config's category is
-  AppearanceCategory). Four independent on/off switches plus the icon chooser. Bound back via the
+  AppearanceCategory). Six independent on/off switches plus the icon chooser. Bound back via the
   DataBoundSetters on InteractiveInputAppearanceConfig; unchecked boxes reset to false in configure().
 -->
 <j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form">
@@ -49,6 +49,29 @@
         mirrored in the browser tab: a "(N)" prefix on the tab title and a small red dot painted on top
         of the current favicon. It does not replace the site favicon, so a custom favicon (e.g. one set
         by the Simple Theme plugin) is preserved. On by default.
+      </f:description>
+    </f:entry>
+
+    <f:entry>
+      <f:checkbox field="viewBuildCard"
+                  title="Show the Interactive View card on the build page"
+                  default="true"/>
+      <f:description>
+        The compact "Interactive View" card on a build's overview (experimental build-page layout) that
+        lists that build's published reviews with their status and comment count. Turn this off to hide
+        the card and its build-page tab; the dedicated Interactive View page, the sidebar link and the
+        build-history badge stay reachable. On by default.
+      </f:description>
+    </f:entry>
+
+    <f:entry>
+      <f:checkbox field="outputBuildCard"
+                  title="Show the Interactive Output card on the build page"
+                  default="true"/>
+      <f:description>
+        The "Interactive Output" card of per-build metrics on a build's page: the native overview card in
+        the experimental layout and the summary row in the classic layout. Turn this off to hide both; the
+        dedicated Interactive Output page stays reachable. On by default.
       </f:description>
     </f:entry>
 

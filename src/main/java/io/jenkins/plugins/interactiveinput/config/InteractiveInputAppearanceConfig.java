@@ -36,6 +36,12 @@ import org.kohsuke.stapler.StaplerRequest2;
  *       pending count in the browser tab (a "(N)" title prefix and a small dot painted on top of the
  *       existing favicon) when the header bell is enabled. It never replaces the site favicon, so a
  *       custom favicon (e.g. from the Simple Theme plugin) is preserved.</li>
+ *   <li>{@link #isViewBuildCard() viewBuildCard} — the Interactive View card on the build overview
+ *       (experimental layout). On by default; turn off to hide the card and its top-nav tab while the
+ *       dedicated review page, sidebar link and badge stay reachable.</li>
+ *   <li>{@link #isOutputBuildCard() outputBuildCard} — the Interactive Output card on the build page.
+ *       On by default; gates both the experimental overview card and the classic summary row, while the
+ *       dedicated output page stays reachable.</li>
  *   <li>{@link #getIcon() icon} — which Ionicon represents interactive input across the bell, badge
  *       and sidebar.</li>
  * </ul>
@@ -80,6 +86,8 @@ public class InteractiveInputAppearanceConfig extends GlobalConfiguration {
     private boolean perProjectCentre = true;
     private boolean jobPageBox = true;
     private boolean tabNotificationBadge = true;
+    private boolean viewBuildCard = true;
+    private boolean outputBuildCard = true;
 
     @NonNull
     private String icon = DEFAULT_ICON;
@@ -143,6 +151,26 @@ public class InteractiveInputAppearanceConfig extends GlobalConfiguration {
         save();
     }
 
+    public boolean isViewBuildCard() {
+        return viewBuildCard;
+    }
+
+    @DataBoundSetter
+    public void setViewBuildCard(boolean viewBuildCard) {
+        this.viewBuildCard = viewBuildCard;
+        save();
+    }
+
+    public boolean isOutputBuildCard() {
+        return outputBuildCard;
+    }
+
+    @DataBoundSetter
+    public void setOutputBuildCard(boolean outputBuildCard) {
+        this.outputBuildCard = outputBuildCard;
+        save();
+    }
+
     @NonNull
     public String getIcon() {
         return ICON_CHOICES.contains(icon) ? icon : DEFAULT_ICON;
@@ -202,6 +230,18 @@ public class InteractiveInputAppearanceConfig extends GlobalConfiguration {
         return c == null || c.isTabNotificationBadge();
     }
 
+    /** @return whether the Interactive View card on the build overview is enabled. On by default. */
+    public static boolean viewBuildCardEnabled() {
+        InteractiveInputAppearanceConfig c = get();
+        return c == null || c.isViewBuildCard();
+    }
+
+    /** @return whether the Interactive Output card on the build page is enabled. On by default. */
+    public static boolean outputBuildCardEnabled() {
+        InteractiveInputAppearanceConfig c = get();
+        return c == null || c.isOutputBuildCard();
+    }
+
     /** @return the configured icon's symbol class, or the default's when unconfigured. */
     @NonNull
     public static String iconClassNameOrDefault() {
@@ -233,6 +273,8 @@ public class InteractiveInputAppearanceConfig extends GlobalConfiguration {
         this.perProjectCentre = false;
         this.jobPageBox = false;
         this.tabNotificationBadge = false;
+        this.viewBuildCard = false;
+        this.outputBuildCard = false;
         this.icon = DEFAULT_ICON;
         req.bindJSON(this, json);
         save();

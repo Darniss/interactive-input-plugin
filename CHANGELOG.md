@@ -29,7 +29,7 @@ All notable changes to this project are documented here. The format follows
   recipients/webhook). Preferences are **persisted only**; delivery ships in a future release.
 - **Appearance configuration** — new `InteractiveInputAppearanceConfig` (`GlobalConfiguration` in the
   `AppearanceCategory`) surfaces under **Manage Jenkins → Appearance → Interactive Input**, and as code
-  under `appearance.interactiveInputAppearance`. It holds four independent on/off switches and an icon
+  under `appearance.interactiveInputAppearance`. It holds six independent on/off switches and an icon
   chooser:
   - `notificationCentre` (default **off**) — the global header bell, now **context-scoped**: the
     dashboard lists every answerable question; inside a pipeline (job/build page) it narrows to that
@@ -44,6 +44,12 @@ All notable changes to this project are documented here. The format follows
     pixels — e.g. a Simple Theme plugin favicon on another host) it falls back to a red-circle glyph
     (U+1F534) + `(N)` prefix on the tab **title** and leaves the favicon exactly as the theme set it.
     It never replaces the site favicon.
+  - `viewBuildCard` (default **on**) — shows the compact **Interactive View** card (and its top-nav tab)
+    on a build's overview under the experimental layout. Turning it off hides the card while the dedicated
+    review page, sidebar link and build-history badge stay reachable.
+  - `outputBuildCard` (default **on**) — shows the **Interactive Output** card of per-build metrics on a
+    build's page — the native overview card under the experimental layout **and** the classic summary row.
+    Turning it off hides both; the dedicated output page stays reachable.
   - `icon` (default `megaphone`) — the notification icon used across the bell, badge and
     sidebar, chosen from seven meaning-matched Ionicons (`ionicons-api`).
 - **Attention pulse** — the build-history "awaiting input" badge and the job-page box title blink
@@ -144,6 +150,22 @@ All notable changes to this project are documented here. The format follows
 - **Dependencies** — `prism-api` (syntax highlighting for the review page) and `echarts-api` (the
   per-job trend chart) added; both are BOM-managed and ship their own JS/CSS as plugin dependencies
   (no bundled jars, so `strictBundledArtifacts` stays on).
+- **Interactive View overview card (experimental build page)** — with the **new-build-page** flag on, a
+  build's reviews now surface as a native **Interactive View** overview card + run tab, at parity with
+  the Interactive Output card. A new `InteractiveViewRunTab` (`jenkins.model.Tab`, attached by a
+  `TransientActionFactory<Run>` whenever the build has any review) renders a compact per-report list —
+  each review's title (deep-linking to `interactive-view/?doc=<id>`), status pill, notified flag, and
+  comment count — plus a "View all reviews" link to the full `interactive-view/` page, and a
+  `doIndex` redirect from the tab's own `interactive-view-overview` route to that page. It is visible
+  only when the viewer has the experimental layout enabled **and** can read at least one review
+  (`getReviews()` is `ViewStore`-scoped); the classic layout and the existing per-job/per-build view
+  pages, sidebar link, overflow `(N)`, and badge are unchanged. The card lists **all** of the build's
+  readable reviews in a height-capped, scrollable panel (~10 rows before it scrolls, with the "View all
+  reviews" link pinned below), shows each review's **file name** beneath its title, and omits the
+  report-name heading when it would merely repeat a lone file's title — the common single-file publish,
+  where the step defaults an unset `title` to the `reportName` (`InteractiveViewRunTab.OverviewGroup`
+  decides this in Java so the Jelly stays trivial). It is also gated by the new `viewBuildCard`
+  Appearance switch.
 
 ### Changed
 - **Under the experimental layout, our UI now renders natively instead of inside the "Legacy" card.**

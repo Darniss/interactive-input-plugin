@@ -12,12 +12,16 @@ import hudson.model.Run;
 import hudson.model.User;
 import hudson.security.ACL;
 import hudson.security.ACLContext;
+import io.jenkins.plugins.interactiveinput.config.InteractiveInputAppearanceConfig;
 import io.jenkins.plugins.interactiveinput.config.InteractiveInputRunPageAlertJobProperty;
 import io.jenkins.plugins.interactiveinput.model.Choice;
 import io.jenkins.plugins.interactiveinput.model.Question;
 import io.jenkins.plugins.interactiveinput.output.InteractiveOutputBuildAction;
 import io.jenkins.plugins.interactiveinput.output.InteractiveOutputRunTab;
 import io.jenkins.plugins.interactiveinput.store.QuestionStore;
+import io.jenkins.plugins.interactiveinput.view.ReviewDocument;
+import io.jenkins.plugins.interactiveinput.view.ViewStore;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import jenkins.model.Tab;
@@ -65,6 +69,30 @@ class ExperimentalRunTabsTest {
         return run.getRunTabs().stream().anyMatch(type::isInstance);
     }
 
+    /** A minimal review document for exercising the overview card's grouping/heading logic. */
+    private static ReviewDocument review(
+            String id, String job, int build, String reportName, String title, String fileName, String groupId) {
+        return new ReviewDocument(
+                id,
+                job,
+                build,
+                reportName,
+                title,
+                fileName,
+                ReviewDocument.FORMAT_MARKDOWN,
+                "markdown",
+                "tester",
+                System.currentTimeMillis(),
+                true, // commentable
+                false, // editable
+                false, // notify
+                false, // blocking
+                null, // submitterFilter
+                0L, // slaMs
+                groupId,
+                ReviewDocument.MODE_REVIEW);
+    }
+
     @Test
     void outputCardIsNativeInExperimentalAndClassicSummaryFlips(JenkinsRule j) throws Exception {
         withUsers(j);
@@ -98,6 +126,21 @@ class ExperimentalRunTabsTest {
             assertFalse(action.isClassicSummaryVisible(), "the classic summary is suppressed (no Legacy duplicate)");
             assertNotNull(action.getIconFileName(), "the action is still reachable via the overflow menu");
         }
+
+        // Appearance toggle hides the Output card in both layouts (experimental card and classic summary),
+        // while the dedicated Interactive Output page stays reachable via the action's own icon.
+        InteractiveInputAppearanceConfig appearance = InteractiveInputAppearanceConfig.get();
+        assertNotNull(appearance);
+        appearance.setOutputBuildCard(false);
+        try (ACLContext ignored = ACL.as2(user("outClassicOff", Map.of()).impersonate2())) {
+            assertFalse(action.isClassicSummaryVisible(), "the classic summary is hidden when the Output toggle is off");
+            assertNotNull(action.getIconFileName(), "the output action stays reachable when the card is off");
+        }
+        try (ACLContext ignored = ACL.as2(user("outExpOff", Map.of(NEW_BUILD_PAGE, "true")).impersonate2())) {
+            assertNull(tab.getIconFileName(), "the experimental output card is hidden when the toggle is off");
+            assertFalse(hasTab(b, InteractiveOutputRunTab.class), "no output run tab when the toggle is off");
+        }
+        appearance.setOutputBuildCard(true);
     }
 
     @Test
@@ -148,6 +191,97 @@ class ExperimentalRunTabsTest {
             assertFalse(tab.isWaiting(), "no longer waiting after settle");
             assertNull(tab.getIconFileName(), "the input tab is hidden once the question is settled");
         }
+    }
+
+    @Test
+    void viewCardIsNativeInExperimentalWhenReviewsExist(JenkinsRule j) throws Exception {
+        withUsers(j);
+        FreeStyleProject p = j.createFreeStyleProject("vjob");
+        FreeStyleBuild b = j.buildAndAssertSuccess(p);
+
+        // A build with at least one review — the same gate the persisted view action uses.
+        ViewStore.get()
+                .submit(
+                        new ReviewDocument(
+                                "vrev1",
+                                p.getFullName(),
+                                b.getNumber(),
+                                "Report",
+                                "report.md",
+                                "report.md",
+                                ReviewDocument.FORMAT_MARKDOWN,
+                                "markdown",
+                                "tester",
+                                System.currentTimeMillis(),
+                                true, // commentable
+                                false, // editable
+                                true, // notify
+                                false, // blocking
+                                null, // submitterFilter
+                                0L, // slaMs
+                                null, // groupId
+                                ReviewDocument.MODE_REVIEW),
+                        "# hello");
+
+        InteractiveViewRunTab tab = b.getAction(InteractiveViewRunTab.class);
+        assertNotNull(tab, "the view tab is attached once the build has a review (layout-independent)");
+        // Distinct URL so the tab's own route never collides with the canonical view action route.
+        assertEquals("interactive-view-overview", tab.getUrlName());
+
+        // Classic viewer: no native tab; the persisted view action stays reachable via the sidebar/overflow.
+        try (ACLContext ignored = ACL.as2(user("viewClassic", Map.of()).impersonate2())) {
+            assertNull(tab.getIconFileName(), "the view tab is hidden (null icon) in the classic layout");
+            assertFalse(hasTab(b, InteractiveViewRunTab.class), "no native view run tab in the classic layout");
+        }
+
+        // Experimental viewer: native card visible, listing the build's readable reviews.
+        try (ACLContext ignored = ACL.as2(user("viewExp", Map.of(NEW_BUILD_PAGE, "true")).impersonate2())) {
+            assertNotNull(tab.getIconFileName(), "the view tab is visible in the experimental layout");
+            assertTrue(hasTab(b, InteractiveViewRunTab.class), "the view tab is in getRunTabs in experimental");
+            assertFalse(tab.getReviews().isEmpty(), "the card lists the build's readable reviews");
+        }
+
+        // Appearance toggle hides the View card (and its tab) even in the experimental layout; the
+        // dedicated review page / sidebar entry remain reachable via the persisted view action.
+        InteractiveInputAppearanceConfig appearance = InteractiveInputAppearanceConfig.get();
+        assertNotNull(appearance);
+        appearance.setViewBuildCard(false);
+        try (ACLContext ignored = ACL.as2(user("viewExpOff", Map.of(NEW_BUILD_PAGE, "true")).impersonate2())) {
+            assertNull(tab.getIconFileName(), "the view card is hidden when the Appearance toggle is off");
+            assertFalse(hasTab(b, InteractiveViewRunTab.class), "no view run tab when the Appearance toggle is off");
+        }
+        appearance.setViewBuildCard(true);
+    }
+
+    @Test
+    void viewOverviewGroupsSuppressRedundantHeadings(JenkinsRule j) throws Exception {
+        withUsers(j);
+        FreeStyleProject p = j.createFreeStyleProject("vgroups");
+        FreeStyleBuild b = j.buildAndAssertSuccess(p);
+        String job = p.getFullName();
+        int n = b.getNumber();
+        ViewStore vs = ViewStore.get();
+        // Lone file whose title defaults to its report name (single-file publish) -> heading is redundant.
+        vs.submit(review("g-solo", job, n, "Solo", "Solo", "solo.md", null), "# a");
+        // Lone file carrying a distinct title -> the report heading still adds information.
+        vs.submit(review("g-custom", job, n, "Custom", "Custom Title", "c.md", null), "# b");
+        // A real multi-file group (glob) -> the heading groups the files.
+        vs.submit(review("g-a", job, n, "Docs", "docs/a.md", "docs/a.md", "grp"), "# c");
+        vs.submit(review("g-b", job, n, "Docs", "docs/b.md", "docs/b.md", "grp"), "# d");
+
+        InteractiveViewRunTab tab = b.getAction(InteractiveViewRunTab.class);
+        assertNotNull(tab, "the view tab attaches once the build has reviews");
+        Map<String, Boolean> headingShown = new HashMap<>();
+        for (InteractiveViewRunTab.OverviewGroup g : tab.getOverviewGroups()) {
+            headingShown.put(g.getReportName(), g.isShowHeading());
+        }
+        assertEquals(
+                Boolean.FALSE,
+                headingShown.get("Solo"),
+                "a lone file whose title equals its report name hides the duplicate heading");
+        assertEquals(
+                Boolean.TRUE, headingShown.get("Custom"), "a lone file with a custom title keeps its report heading");
+        assertEquals(Boolean.TRUE, headingShown.get("Docs"), "a multi-file group keeps its report heading");
     }
 
     @Test

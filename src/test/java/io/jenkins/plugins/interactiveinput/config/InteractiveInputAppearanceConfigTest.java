@@ -28,6 +28,8 @@ class InteractiveInputAppearanceConfigTest {
         assertTrue(c.isPerProjectCentre(), "per-project centre is on by default");
         assertTrue(c.isJobPageBox(), "job-page box is on by default");
         assertTrue(c.isTabNotificationBadge(), "browser-tab badge is on by default");
+        assertTrue(c.isViewBuildCard(), "Interactive View build-page card is on by default");
+        assertTrue(c.isOutputBuildCard(), "Interactive Output build-page card is on by default");
         assertEquals(InteractiveInputAppearanceConfig.DEFAULT_ICON, c.getIcon());
         assertEquals("megaphone", c.getIcon(), "default notification icon is the megaphone");
 
@@ -36,6 +38,8 @@ class InteractiveInputAppearanceConfigTest {
         assertTrue(InteractiveInputAppearanceConfig.perProjectCentreEnabled());
         assertTrue(InteractiveInputAppearanceConfig.jobPageBoxEnabled());
         assertTrue(InteractiveInputAppearanceConfig.tabNotificationBadgeEnabled());
+        assertTrue(InteractiveInputAppearanceConfig.viewBuildCardEnabled());
+        assertTrue(InteractiveInputAppearanceConfig.outputBuildCardEnabled());
     }
 
     @Test
@@ -48,6 +52,22 @@ class InteractiveInputAppearanceConfigTest {
 
         c.setTabNotificationBadge(true);
         assertTrue(InteractiveInputAppearanceConfig.tabNotificationBadgeEnabled());
+    }
+
+    @Test
+    void buildCardTogglesPersistThroughSetters(JenkinsRule j) {
+        InteractiveInputAppearanceConfig c = InteractiveInputAppearanceConfig.get();
+        assertNotNull(c);
+
+        c.setViewBuildCard(false);
+        assertFalse(InteractiveInputAppearanceConfig.viewBuildCardEnabled());
+        c.setViewBuildCard(true);
+        assertTrue(InteractiveInputAppearanceConfig.viewBuildCardEnabled());
+
+        c.setOutputBuildCard(false);
+        assertFalse(InteractiveInputAppearanceConfig.outputBuildCardEnabled());
+        c.setOutputBuildCard(true);
+        assertTrue(InteractiveInputAppearanceConfig.outputBuildCardEnabled());
     }
 
     @Test

@@ -5,6 +5,7 @@ import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.Extension;
 import hudson.model.Action;
 import hudson.model.Run;
+import io.jenkins.plugins.interactiveinput.config.InteractiveInputAppearanceConfig;
 import io.jenkins.plugins.interactiveinput.ui.ExperimentalLayout;
 import java.io.IOException;
 import java.util.Collection;
@@ -87,7 +88,9 @@ public class InteractiveOutputRunTab extends Tab {
     @Override
     @CheckForNull
     public String getIconFileName() {
-        return ExperimentalLayout.newBuildPage() ? InteractiveOutputBuildAction.ICON : null;
+        return ExperimentalLayout.newBuildPage() && InteractiveInputAppearanceConfig.outputBuildCardEnabled()
+                ? InteractiveOutputBuildAction.ICON
+                : null;
     }
 
     @Override
