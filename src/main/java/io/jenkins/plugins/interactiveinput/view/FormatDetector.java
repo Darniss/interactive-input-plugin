@@ -72,7 +72,10 @@ public final class FormatDetector {
             Map.entry("properties", "properties"),
             Map.entry("dockerfile", "docker"),
             Map.entry("tf", "hcl"),
-            Map.entry("gradle", "groovy"));
+            Map.entry("gradle", "groovy"),
+            // Robot Framework test suites (.robot) and resource files (.resource) share one Prism grammar.
+            Map.entry("robot", "robotframework"),
+            Map.entry("resource", "robotframework"));
 
     private FormatDetector() {}
 

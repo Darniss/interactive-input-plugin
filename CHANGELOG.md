@@ -84,7 +84,9 @@ All notable changes to this project are documented here. The format follows
     durable store (`$JENKINS_HOME/interactive-input/views/`, metadata in `views.xml`), so the review
     survives workspace cleanup. Markdown is rendered to sanitised HTML; HTML/code/text are shown as
     **escaped, syntax-highlighted source** (never executed) via `prism-api`. Snapshots are bounded
-    (2&nbsp;MB each).
+    (2&nbsp;MB each). Robot Framework files (`.robot` test suites, `.resource` resource files) are
+    detected as source and highlighted with Prism's `robotframework` grammar (autoloaded from `prism-api`),
+    like the other mapped languages; unmapped extensions still fall back to escaped plain text.
   - **Folders & dynamically-generated files** — beyond a single `file`, the step accepts an Ant-style
     `includes` glob (e.g. `reports/**/*.md`) with optional `excludes`, or a `dir` (sugar for `dir/**`).
     Each match becomes **one review** sharing a `groupId` + `reportName`, so a report folder whose exact
