@@ -605,7 +605,12 @@ public class ApiRootAction implements UnprotectedRootAction {
             return new JsonHttpResponse(200, o);
         }
 
-        /** POST /views/{id}/comments — add an inline or general comment. */
+        /**
+         * POST /views/{id}/comments — add an inline or general comment, optionally as a threaded reply
+         * ({@code parentId}) and/or with a display-only author label ({@code authorLabel}, or set
+         * {@code automated:true} to use the configured global label). The audit author is always the
+         * authenticated Jenkins identity — never taken from the request — so a label cannot spoof it.
+         */
         @RequirePOST
         public HttpResponse doComments(StaplerRequest2 req) {
             HttpResponse gate = mutationGate();
@@ -632,8 +637,18 @@ public class ApiRootAction implements UnprotectedRootAction {
             if (line < 1) {
                 line = ReviewComment.GENERAL;
             }
+            String parentId = optString(body, "parentId");
+            // Display label resolution: an explicit authorLabel wins; otherwise an automated reply uses the
+            // configured global default; a plain comment has none. The label is display-only (the client
+            // renders it via textContent) and length-bounded here.
+            String authorLabel = boundLabel(optString(body, "authorLabel"));
+            if (authorLabel == null && body.optBoolean("automated", false)) {
+                authorLabel = boundLabel(InteractiveInputGlobalConfig.automationReplyNameOrDefault());
+            }
             try {
-                store.addComment(id, line, text, ViewStore.currentUserId());
+                store.addComment(id, line, text, ViewStore.currentUserId(), parentId, authorLabel);
+            } catch (IllegalArgumentException e) {
+                return JsonHttpResponse.error(400, e.getMessage());
             } catch (IllegalStateException e) {
                 return JsonHttpResponse.error(409, e.getMessage());
             }
@@ -666,8 +681,11 @@ public class ApiRootAction implements UnprotectedRootAction {
             if (content.length() > MAX_EDIT_CHARS) {
                 return JsonHttpResponse.error(400, "content too large (max " + MAX_EDIT_CHARS + " chars)");
             }
+            // Optional, display-only edit summary (e.g. an AI course-correction reason) recorded in the
+            // version history; a blank/absent note keeps the default "edited" label.
+            String note = boundText(body.optString("note", null), MAX_VERSION_NOTE_CHARS);
             try {
-                store.saveEdit(id, content, ViewStore.currentUserId());
+                store.saveEdit(id, content, ViewStore.currentUserId(), note);
             } catch (IllegalStateException e) {
                 return JsonHttpResponse.error(409, e.getMessage());
             }
@@ -840,10 +858,14 @@ public class ApiRootAction implements UnprotectedRootAction {
         }
         putIfPresent(o, "body", req.getParameter("body"));
         putIfPresent(o, "content", req.getParameter("content"));
+        putIfPresent(o, "note", req.getParameter("note"));
         putIfPresent(o, "line", req.getParameter("line"));
         putIfPresent(o, "decision", req.getParameter("decision"));
         putIfPresent(o, "commentId", req.getParameter("commentId"));
         putIfPresent(o, "resolved", req.getParameter("resolved"));
+        putIfPresent(o, "parentId", req.getParameter("parentId"));
+        putIfPresent(o, "authorLabel", req.getParameter("authorLabel"));
+        putIfPresent(o, "automated", req.getParameter("automated"));
         return o;
     }
 
@@ -964,6 +986,36 @@ public class ApiRootAction implements UnprotectedRootAction {
         }
         String s = o.getString(key);
         return s.isEmpty() ? null : s;
+    }
+
+    /** Bound for a display-only comment author label (mirrors the global config cap). */
+    private static final int MAX_LABEL_CHARS = 64;
+
+    /** Bound for a version note (e.g. an AI edit summary) shown in the viewer's version dropdown. */
+    private static final int MAX_VERSION_NOTE_CHARS = 280;
+
+    /**
+     * Normalise short display text: control characters (incl. newlines) collapsed to spaces, trimmed and
+     * length-bounded to {@code max}. Returns {@code null} for a blank/absent value. These strings are
+     * rendered by the client via {@code textContent} (never innerHTML), so bounding here just keeps a
+     * runaway value from breaking the layout — no HTML escaping is needed.
+     */
+    @CheckForNull
+    private static String boundText(@CheckForNull String raw, int max) {
+        if (raw == null) {
+            return null;
+        }
+        String s = raw.replaceAll("\\p{Cntrl}", " ").trim();
+        if (s.isEmpty()) {
+            return null;
+        }
+        return s.length() > max ? s.substring(0, max).trim() : s;
+    }
+
+    /** Normalise a display-only comment author label (see {@link #boundText}). */
+    @CheckForNull
+    private static String boundLabel(@CheckForNull String raw) {
+        return boundText(raw, MAX_LABEL_CHARS);
     }
 
     @NonNull

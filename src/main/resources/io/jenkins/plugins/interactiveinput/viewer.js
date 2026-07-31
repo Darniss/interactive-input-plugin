@@ -5,9 +5,13 @@
  * bell.js so the notification client stays lean. Renders a Confluence-style two-pane review UI over the
  * permission-checked REST API: rendered markdown / escaped, Prism-highlighted source on the left; a
  * general comment thread plus inline (per-line) comments on the right. Inline comments can be added from
- * BOTH the Source view (per line) and the Rendered view (per markdown block, anchored to the block's
- * source line). Also an edit-copy mode with version history; and Approve / Request changes / Reject /
- * Acknowledge — "Request changes" hands the inline comments back to the pipeline (regenerate loop).
+ * BOTH the Source view (per line) and the Rendered view (per element — heading, paragraph, list item,
+ * table row, ... — anchored directly to that element's exact source line, no line picker). Comments can
+ * be threaded: a reply (parentId) renders nested under its parent, and a display-only authorLabel (e.g. an
+ * automation's "AI response") shows with an "automation" chip while the real Jenkins author is preserved.
+ * Also an edit-copy mode with version history (edits may carry a summary note); and Approve / Request
+ * changes / Reject / Acknowledge — "Request changes" hands the inline comments back to the pipeline
+ * (regenerate loop).
  *
  * Security: file content is ALWAYS inserted via textContent (escaped, never executed). Only
  * server-sanitised HTML — rendered markdown (detail.renderedHtml) and rendered comment bodies
@@ -84,9 +88,7 @@
     var state = {
       detail: null,
       mode: "rendered", // "rendered" | "source" | "edit"
-      selectedLine: 0, // 0 = none; the EXACT source line a new comment anchors to (picker choice in rendered mode)
-      selectedLineEnd: 0, // 0 = exact single line (source); >= selectedBlockLo = block end line (rendered)
-      selectedBlockLo: 0, // rendered mode only: first source line of the selected markdown block (picker range start)
+      selectedLine: 0, // 0 = none; the EXACT source line a new comment anchors to (Source row or Rendered element)
       viewingVersion: 0, // 0 = latest
       versionContent: null, // content of a non-latest version being viewed
     };
@@ -351,6 +353,11 @@
         d.versions.forEach(function (v) {
           var latest = v.index === d.currentVersion;
           var label = "v" + v.index + (latest ? " (latest)" : "") + (v.editedBy ? " \u2014 " + v.editedBy : "");
+          // Surface a meaningful edit summary (e.g. an AI course-correction note) but skip the generic
+          // defaults so ordinary edits stay compact. text: (textContent) keeps it injection-safe.
+          if (v.note && v.note !== "edited" && v.note !== "original snapshot") {
+            label += ": " + (v.note.length > 60 ? v.note.slice(0, 60) + "\u2026" : v.note);
+          }
           var opt = el("option", { text: label, attrs: { value: String(v.index) } });
           if ((state.viewingVersion === 0 && latest) || state.viewingVersion === v.index) opt.selected = true;
           sel.appendChild(opt);
@@ -499,74 +506,61 @@
       renderSource(left);
     }
 
-    // Add inline-comment affordances to the rendered markdown: each top-level block carries a
-    // data-source-line (added server-side by MarkdownRenderer). We wrap each block so a hover "+" (add)
-    // or a count marker (existing comments) can be positioned in a left gutter without invalid nesting,
-    // and clicking either opens the block's thread in the right pane. Comments reuse the SAME line model
-    // as the Source view (anchored to the block's start line), so they round-trip to the pipeline.
+    // Add inline-comment affordances to the rendered markdown. MarkdownRenderer stamps EVERY commentable
+    // element (heading, paragraph, list item, table row, ...) with data-source-line; we decorate the
+    // INNERMOST anchored element (so a table row, not the whole table) in place — a hover "+" to comment
+    // that EXACT line and a count marker for existing comments — and clicking either opens that line's
+    // thread. A <tr>/<li> cannot be wrapped in a <div> (invalid HTML), so the controls are hosted on the
+    // element itself (or its first cell for a row) and placed in a left gutter via CSS. Comments use the
+    // same per-line model as the Source view, so they round-trip to the pipeline unchanged.
     function decorateRenderedBlocks(rendered) {
       var d = state.detail;
-      var blocks = Array.prototype.slice.call(rendered.querySelectorAll("[data-source-line]"));
-      if (!blocks.length) return;
+      var all = Array.prototype.slice.call(rendered.querySelectorAll("[data-source-line]"));
+      if (!all.length) return;
+      // Keep only the innermost anchors: a container (e.g. <table>, <ul>) that holds a more specific
+      // anchored element (<tr>, <li>) is skipped, so each visible line carries exactly one affordance.
+      var blocks = all.filter(function (node) {
+        return node.querySelector("[data-source-line]") == null;
+      });
       var canComment = d.commentable && d.canContribute && isLatest();
       var commentsByLine = groupLineComments();
-      var lineCount = currentContent().split(/\r\n|\r|\n/).length;
-      var starts = blocks.map(function (b) {
-        return parseInt(b.getAttribute("data-source-line"), 10) || 1;
-      });
 
-      blocks.forEach(function (block, i) {
-        var lo = i === 0 ? 1 : starts[i];
-        // The last block runs to the end of the file; cap to the real line count so the picker never
-        // offers non-existent lines (previously Number.MAX_SAFE_INTEGER).
-        var hi = i < blocks.length - 1 ? starts[i + 1] - 1 : lineCount;
-        if (hi < lo) hi = lo;
-        var anchor = starts[i];
+      blocks.forEach(function (node) {
+        var line = parseInt(node.getAttribute("data-source-line"), 10) || 0;
+        if (line < 1) return;
+        node.classList.add("iv-anchor");
+        if (state.selectedLine === line) node.classList.add("selected");
+        // A table row hosts its gutter controls inside its first cell (a control placed directly under a
+        // <tr> would be invalid HTML); every other element hosts them directly.
+        var host = node.tagName === "TR" ? node.firstElementChild || node : node;
+        host.classList.add("iv-anchor-host");
 
-        var count = 0;
-        Object.keys(commentsByLine).forEach(function (ln) {
-          var n = parseInt(ln, 10);
-          if (n >= lo && n <= hi) count += commentsByLine[n].length;
-        });
-
-        var wrap = el("div", { cls: "iv-rblock" });
-        block.parentNode.insertBefore(wrap, block);
-        wrap.appendChild(block);
-        if (count > 0) wrap.classList.add("has-comments");
-        if (state.mode === "rendered" && state.selectedLineEnd && state.selectedLine >= lo && state.selectedLine <= hi) {
-          wrap.classList.add("selected");
-        }
-
-        if (count > 0) {
-          var marker = el("span", { cls: "iv-rblock-marker", text: String(count), attrs: { title: count + " comment(s) — click to view" } });
-          marker.addEventListener("click", function () {
-            selectBlock(anchor, hi, wrap);
+        var lineComments = commentsByLine[line];
+        if (lineComments && lineComments.length) {
+          node.classList.add("has-comments");
+          var marker = el("span", {
+            cls: "iv-rblock-marker",
+            text: String(lineComments.length),
+            attrs: { title: lineComments.length + " comment(s) on line " + line + " \u2014 click to view" },
           });
-          wrap.appendChild(marker);
+          marker.addEventListener("click", function (e) {
+            e.preventDefault();
+            selectLine(line);
+          });
+          host.appendChild(marker);
         } else if (canComment) {
-          var add = el("button", { cls: "iv-rblock-add", text: "+", attrs: { title: "Comment on this section", "aria-label": "Comment on this section" } });
+          var add = el("button", {
+            cls: "iv-rblock-add",
+            text: "+",
+            attrs: { type: "button", title: "Comment on line " + line, "aria-label": "Comment on line " + line },
+          });
           add.addEventListener("click", function (e) {
             e.preventDefault();
-            selectBlock(anchor, hi, wrap);
+            selectLine(line);
           });
-          wrap.appendChild(add);
+          host.appendChild(add);
         }
       });
-    }
-
-    // Select a rendered block's source-line range: shows its thread (comments within [start,end]) plus a
-    // line-picker (renderComments) so a new comment can be anchored to any exact source line in the block.
-    // selectedLine defaults to the block start; the picker updates it.
-    function selectBlock(startLine, endLine, wrapEl) {
-      state.selectedBlockLo = startLine;
-      state.selectedLine = startLine;
-      state.selectedLineEnd = endLine;
-      var sel = root.querySelectorAll(".iv-rblock.selected");
-      for (var i = 0; i < sel.length; i++) sel[i].classList.remove("selected");
-      if (wrapEl) wrapEl.classList.add("selected");
-      renderComments(root.querySelector(".iv-pane-comments"));
-      var composer = root.querySelector(".iv-line-thread .iv-composer textarea");
-      if (composer) composer.focus();
     }
 
     function renderSource(left) {
@@ -633,13 +627,14 @@
 
     function selectLine(n) {
       state.selectedLine = n;
-      state.selectedLineEnd = 0; // exact single line (Source view)
-      state.selectedBlockLo = 0; // no block range in Source view (no picker)
-      // update row selection without a full re-render
-      var rows = root.querySelectorAll(".iv-line.selected");
-      for (var i = 0; i < rows.length; i++) rows[i].classList.remove("selected");
+      // Update the selection highlight in whichever view is showing (Source rows and/or Rendered
+      // anchors), without a full re-render.
+      var prev = root.querySelectorAll(".iv-line.selected, .iv-anchor.selected");
+      for (var i = 0; i < prev.length; i++) prev[i].classList.remove("selected");
       var row = root.querySelector('.iv-line[data-line="' + n + '"]');
       if (row) row.classList.add("selected");
+      var anchors = root.querySelectorAll('.iv-anchor[data-source-line="' + n + '"]');
+      for (var j = 0; j < anchors.length; j++) anchors[j].classList.add("selected");
       renderComments(root.querySelector(".iv-pane-comments"));
       var composer = root.querySelector(".iv-line-thread .iv-composer textarea");
       if (composer) composer.focus();
@@ -673,42 +668,32 @@
       else if (!d.commentable) gen.appendChild(el("div", { cls: "iv-hint", text: "Comments are disabled for this review." }));
       right.appendChild(gen);
 
-      // Line thread (selected). In Source view a single exact line is selected. In Rendered view a click
-      // selects a markdown block spanning source lines [selectedBlockLo, selectedLineEnd]; a line-picker
-      // then lets the reviewer anchor the new comment to any exact line inside that block, so comments
-      // round-trip identically to the Source view (and to the pipeline).
+      // Line thread (selected): the exact source line the reviewer clicked, in either view. Shows that
+      // line's comments (c.line === selectedLine) plus a composer anchored to the same line, so the
+      // comment round-trips to the pipeline unchanged.
       var lineThread = el("div", { cls: "iv-thread iv-line-thread" });
       if (state.selectedLine >= 1) {
-        var isBlock = state.mode === "rendered" && state.selectedBlockLo >= 1 && state.selectedLineEnd > state.selectedBlockLo;
-        var lo = isBlock ? state.selectedBlockLo : state.selectedLine;
-        var hi = isBlock ? state.selectedLineEnd : state.selectedLine;
-        if (state.selectedLine < lo || state.selectedLine > hi) state.selectedLine = lo;
+        var ln = state.selectedLine;
         var titleRow = el("div", { cls: "iv-line-thread-head" });
-        var titleText = isBlock ? "Selected section (lines " + lo + "\u2013" + hi + ")" : "Line " + lo;
-        titleRow.appendChild(el("h2", { cls: "iv-thread-title", text: titleText }));
-        var clearBtn = el("button", { cls: "iv-clear-line", text: "\u00d7", attrs: { title: "Clear selection" } });
+        titleRow.appendChild(el("h2", { cls: "iv-thread-title", text: "Line " + ln }));
+        var clearBtn = el("button", { cls: "iv-clear-line", text: "\u00d7", attrs: { type: "button", title: "Clear selection" } });
         clearBtn.addEventListener("click", function () {
           state.selectedLine = 0;
-          state.selectedLineEnd = 0;
-          state.selectedBlockLo = 0;
-          var selRows = root.querySelectorAll(".iv-line.selected, .iv-rblock.selected");
+          var selRows = root.querySelectorAll(".iv-line.selected, .iv-anchor.selected");
           for (var i = 0; i < selRows.length; i++) selRows[i].classList.remove("selected");
           renderComments(right);
         });
         titleRow.appendChild(clearBtn);
         lineThread.appendChild(titleRow);
-        // Rendered-view, multi-line block: pick the exact source line to anchor the new comment to.
-        if (isBlock && canComment) lineThread.appendChild(buildLinePicker(lo, hi));
         var lineComments = (d.comments || []).filter(function (c) {
-          return c.line >= lo && c.line <= hi;
+          return c.line === ln;
         });
         appendCommentList(lineThread, lineComments);
-        // For a block the anchor is dynamic (the picker updates state.selectedLine); for a single line it is fixed.
-        if (canComment) lineThread.appendChild(buildComposer(isBlock ? function () { return state.selectedLine; } : lo));
+        if (canComment) lineThread.appendChild(buildComposer(ln));
       } else {
         var hintText =
           state.mode === "rendered"
-            ? "Hover a section and click + to pick a line and comment on it."
+            ? "Hover any line and click + to comment on it."
             : "Click the + on any line to comment on it.";
         lineThread.appendChild(el("div", { cls: "iv-hint", text: hintText }));
       }
@@ -741,105 +726,102 @@
       }
     }
 
-    // Rendered-view line-picker: a markdown block can span several source lines, so let the reviewer
-    // anchor the comment to an EXACT line. Lists the non-blank source lines in [lo,hi] as "L{n}: {snippet}";
-    // choosing one sets state.selectedLine so buildComposer posts comment.line = that line.
-    function buildLinePicker(lo, hi) {
-      var wrap = el("div", { cls: "iv-line-picker" });
-      wrap.appendChild(el("label", { cls: "iv-line-picker-label", text: "Comment on line:", attrs: { "for": "iv-line-picker-sel" } }));
-      var sel = el("select", { cls: "jenkins-select__input iv-line-picker-sel", attrs: { id: "iv-line-picker-sel" } });
-      var srcLines = currentContent().split(/\r\n|\r|\n/);
-      var matched = false;
-      var firstLine = 0;
-      for (var n = lo; n <= hi && n <= srcLines.length; n++) {
-        var raw = (srcLines[n - 1] || "").trim();
-        if (!raw) continue; // blank source line — nothing to anchor to
-        if (!firstLine) firstLine = n;
-        var snippet = raw.length > 60 ? raw.slice(0, 60) + "\u2026" : raw;
-        var opt = el("option", { text: "L" + n + ": " + snippet, attrs: { value: String(n) } });
-        if (n === state.selectedLine) {
-          opt.selected = true;
-          matched = true;
-        }
-        sel.appendChild(opt);
-      }
-      if (!firstLine) {
-        // whole block is blank (unlikely) — fall back to its first line
-        sel.appendChild(el("option", { text: "L" + lo, attrs: { value: String(lo) } }));
-        state.selectedLine = lo;
-      } else if (!matched) {
-        // the current anchor is a blank/out-of-range line — snap to the first selectable line
-        state.selectedLine = firstLine;
-        sel.value = String(firstLine);
-      }
-      sel.addEventListener("change", function () {
-        var v = parseInt(sel.value, 10);
-        if (v >= 1) {
-          state.selectedLine = v;
-          var cta = wrap.parentNode ? wrap.parentNode.querySelector(".iv-composer textarea") : null;
-          if (cta) cta.setAttribute("placeholder", "Comment on line " + v + " (markdown)\u2026");
+    // Map parentId -> ordered replies, computed across ALL comments so a reply always renders under its
+    // parent — even if the parent lives in a different thread (general vs a specific line). The store keeps
+    // threads one level deep (a reply-to-a-reply is re-parented to its root), so this is a simple two-level tree.
+    function repliesByParent() {
+      var map = {};
+      (state.detail.comments || []).forEach(function (c) {
+        if (c.parentId) {
+          (map[c.parentId] = map[c.parentId] || []).push(c);
         }
       });
-      wrap.appendChild(sel);
-      return wrap;
+      return map;
     }
 
     function appendCommentList(container, comments) {
-      if (!comments.length) {
+      // Only roots are listed at the top level of a thread; replies hang off their parent (below). This also
+      // prevents a reply from showing twice when it happens to share the parent's anchor line.
+      var roots = comments.filter(function (c) {
+        return !c.parentId;
+      });
+      if (!roots.length) {
         container.appendChild(el("div", { cls: "iv-hint", text: "No comments yet." }));
         return;
       }
+      var replies = repliesByParent();
       var list = el("div", { cls: "iv-comment-list" });
-      comments.forEach(function (c) {
-        var item = el("div", { cls: "iv-comment" + (c.resolved ? " resolved" : "") });
-        var head = el("div", { cls: "iv-comment-head" });
-        head.appendChild(el("span", { cls: "iv-comment-author", text: c.author || "unknown" }));
-        head.appendChild(el("span", { cls: "iv-comment-time", text: fmtTime(c.createdTs) }));
-        if (c.line >= 1) {
-          var chip = el("button", { cls: "iv-chip iv-chip-line", text: "L" + c.line });
-          chip.addEventListener("click", function () {
-            if (state.mode !== "source") {
-              state.mode = "source";
-              render();
-            }
-            selectLine(c.line);
+      roots.forEach(function (c) {
+        list.appendChild(renderCommentItem(c, false));
+        var kids = replies[c.id];
+        if (kids && kids.length) {
+          var thread = el("div", { cls: "iv-reply-list" });
+          kids.forEach(function (r) {
+            thread.appendChild(renderCommentItem(r, true));
           });
-          head.appendChild(chip);
+          list.appendChild(thread);
         }
-        item.appendChild(head);
-        // bodyHtml is server-sanitised markdown (MarkdownRenderer) — safe to insert.
-        item.appendChild(el("div", { cls: "iv-comment-body", html: c.bodyHtml || "" }));
-
-        if (state.detail.canContribute) {
-          var foot = el("div", { cls: "iv-comment-foot" });
-          var toggle = el("button", { cls: "iv-link-btn", text: c.resolved ? "Reopen" : "Resolve" });
-          toggle.addEventListener("click", function () {
-            postJson(viewUrl(docId) + "/resolveComment", { commentId: c.id, resolved: !c.resolved }).then(function (res) {
-              if (!res.ok) {
-                flash(errorMessage(res), true);
-                return;
-              }
-              applyDetail(res.body);
-              renderComments(root.querySelector(".iv-pane-comments"));
-            });
-          });
-          foot.appendChild(toggle);
-          item.appendChild(foot);
-        }
-        list.appendChild(item);
       });
       container.appendChild(list);
     }
 
-    // line is a fixed line number (Source view / single-line block / -1 for general) OR a getter function
-    // returning the current anchor line (Rendered view, where the picker changes state.selectedLine).
-    function buildComposer(line) {
-      function anchorLine() {
-        return typeof line === "function" ? line() : line;
+    // Render one comment. Replies (isReply) are indented under their parent. When a comment carries a
+    // display-only authorLabel (e.g. an automation's "AI response"), that label is shown as the author with
+    // an "automation" chip, while the real server-set author stays visible via the head's title for audit.
+    function renderCommentItem(c, isReply) {
+      var item = el("div", { cls: "iv-comment" + (isReply ? " iv-reply" : "") + (c.resolved ? " resolved" : "") });
+      var head = el("div", { cls: "iv-comment-head" });
+      var labelled = typeof c.authorLabel === "string" && c.authorLabel.length > 0;
+      // text: (textContent) — never innerHTML — so a label can never inject markup.
+      var authorSpan = el("span", { cls: "iv-comment-author", text: labelled ? c.authorLabel : (c.author || "unknown") });
+      if (labelled) {
+        authorSpan.title = "by " + (c.author || "unknown"); // the true, server-set identity is never hidden
       }
-      var initial = anchorLine();
+      head.appendChild(authorSpan);
+      if (labelled) {
+        head.appendChild(el("span", { cls: "iv-chip iv-chip-auto", text: "automation" }));
+      }
+      head.appendChild(el("span", { cls: "iv-comment-time", text: fmtTime(c.createdTs) }));
+      // A reply inherits its parent's location, so only root comments carry the clickable line chip.
+      if (!isReply && c.line >= 1) {
+        var chip = el("button", { cls: "iv-chip iv-chip-line", text: "L" + c.line });
+        chip.addEventListener("click", function () {
+          if (state.mode !== "source") {
+            state.mode = "source";
+            render();
+          }
+          selectLine(c.line);
+        });
+        head.appendChild(chip);
+      }
+      item.appendChild(head);
+      // bodyHtml is server-sanitised markdown (MarkdownRenderer) — safe to insert.
+      item.appendChild(el("div", { cls: "iv-comment-body", html: c.bodyHtml || "" }));
+
+      if (state.detail.canContribute) {
+        var foot = el("div", { cls: "iv-comment-foot" });
+        var toggle = el("button", { cls: "iv-link-btn", text: c.resolved ? "Reopen" : "Resolve" });
+        toggle.addEventListener("click", function () {
+          postJson(viewUrl(docId) + "/resolveComment", { commentId: c.id, resolved: !c.resolved }).then(function (res) {
+            if (!res.ok) {
+              flash(errorMessage(res), true);
+              return;
+            }
+            applyDetail(res.body);
+            renderComments(root.querySelector(".iv-pane-comments"));
+          });
+        });
+        foot.appendChild(toggle);
+        item.appendChild(foot);
+      }
+      return item;
+    }
+
+    // line is the fixed source line the comment anchors to (a Source row or a Rendered element), or -1 for
+    // a general (unanchored) comment.
+    function buildComposer(line) {
       var wrap = el("div", { cls: "iv-composer" });
-      var ta = el("textarea", { attrs: { rows: "3", placeholder: initial >= 1 ? "Comment on line " + initial + " (markdown)\u2026" : "Add a general comment (markdown)\u2026" } });
+      var ta = el("textarea", { attrs: { rows: "3", placeholder: line >= 1 ? "Comment on line " + line + " (markdown)\u2026" : "Add a general comment (markdown)\u2026" } });
       wrap.appendChild(ta);
       var row = el("div", { cls: "iv-composer-row" });
       var err = el("span", { cls: "iv-composer-err" });
@@ -852,9 +834,8 @@
         }
         err.textContent = "";
         submit.disabled = true;
-        var ln = anchorLine();
         var payload = { body: body };
-        if (ln >= 1) payload.line = ln;
+        if (line >= 1) payload.line = line;
         postJson(viewUrl(docId) + "/comments", payload)
           .then(function (res) {
             submit.disabled = false;
@@ -863,9 +844,9 @@
               return;
             }
             applyDetail(res.body);
-            // A line/block comment adds a gutter marker on the content pane, so re-render both panes
-            // (the selection persists via state.selectedLine); a general comment only touches the right.
-            if (ln >= 1) {
+            // A line comment adds a gutter marker on the content pane, so re-render both panes (the
+            // selection persists via state.selectedLine); a general comment only touches the right.
+            if (line >= 1) {
               render();
             } else {
               renderComments(root.querySelector(".iv-pane-comments"));

@@ -38,4 +38,14 @@ public enum ReviewStatus {
     public boolean isDecided() {
         return this != OPEN;
     }
+
+    /**
+     * @return {@code true} while the durable review copy may still be edited (versioned). Editing is
+     *     allowed while {@link #OPEN} and, deliberately, while {@link #CHANGES_REQUESTED}: that state
+     *     exists precisely so a generator (e.g. the regenerate-agent) can course-correct the document
+     *     in place and record the new version — every other terminal decision is final and read-only.
+     */
+    public boolean allowsEdit() {
+        return this == OPEN || this == CHANGES_REQUESTED;
+    }
 }

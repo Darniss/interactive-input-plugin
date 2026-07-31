@@ -59,5 +59,19 @@
         modal off the plugin uses the native input page and never auto-opens.
       </f:description>
     </f:entry>
+
+    <!-- Ask #2 (automation replies): the display label shown on replies that automation (e.g. the
+         regenerate agent) posts under a reviewer's Interactive View comment. The real comment author kept
+         for audit is always the authenticated Jenkins user/token; this only changes the shown label, and a
+         reply can override it per-call via the REST API. -->
+    <f:entry title="Automation reply name" field="automationReplyName">
+      <f:textbox default="AI response"/>
+      <f:description>
+        Label shown on replies posted by automation (for example the regenerate agent) under a reviewer's
+        Interactive View comment — e.g. "AI response" or "JENKINS response". The author recorded for audit
+        is always the authenticated Jenkins user/token; this only changes the displayed label. Individual
+        replies may override it via the REST API.
+      </f:description>
+    </f:entry>
   </f:section>
 </j:jelly>

@@ -342,10 +342,14 @@ public class ReviewDocument implements Serializable {
         return null;
     }
 
-    /** Record a new content version (the review copy edit) and make it current. */
-    void addVersion(@NonNull String editedBy, long editedTs) {
+    /**
+     * Record a new content version (the review copy edit) and make it current. A blank/{@code null} note
+     * falls back to the default "edited" label so the version dropdown always shows something meaningful.
+     */
+    void addVersion(@NonNull String editedBy, long editedTs, @CheckForNull String note) {
         int next = currentVersion + 1;
-        versions.add(new ContentVersion(next, editedBy, editedTs, "edited"));
+        String label = (note == null || note.trim().isEmpty()) ? "edited" : note.trim();
+        versions.add(new ContentVersion(next, editedBy, editedTs, label));
         currentVersion = next;
     }
 

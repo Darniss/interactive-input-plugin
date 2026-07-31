@@ -28,6 +28,12 @@ public class InteractiveInputGlobalConfig extends GlobalConfiguration {
     /** Default retention for answered/aborted/expired questions before compaction (§8.2). */
     public static final int DEFAULT_RETENTION_DAYS = 7;
 
+    /** Default display label for automation (AI) replies posted under an Interactive View comment. */
+    public static final String DEFAULT_AUTOMATION_REPLY_NAME = "AI response";
+
+    /** Bound the automation reply label so a runaway config value cannot break the comment header. */
+    private static final int MAX_AUTOMATION_REPLY_NAME = 64;
+
     @NonNull
     private Features features = new Features();
 
@@ -42,6 +48,9 @@ public class InteractiveInputGlobalConfig extends GlobalConfiguration {
     private boolean userScopedNotifications;
     private boolean lockToBuildStarter;
     private boolean reopenBuildDialogEveryVisit;
+
+    @NonNull
+    private String automationReplyName = DEFAULT_AUTOMATION_REPLY_NAME;
 
     public InteractiveInputGlobalConfig() {
         load();
@@ -129,6 +138,22 @@ public class InteractiveInputGlobalConfig extends GlobalConfiguration {
         save();
     }
 
+    /** @return the global display label for automation (AI) replies; never blank (defaulted). */
+    @NonNull
+    public String getAutomationReplyName() {
+        return automationReplyName;
+    }
+
+    @DataBoundSetter
+    public void setAutomationReplyName(String automationReplyName) {
+        String v = automationReplyName == null ? "" : automationReplyName.trim();
+        if (v.length() > MAX_AUTOMATION_REPLY_NAME) {
+            v = v.substring(0, MAX_AUTOMATION_REPLY_NAME).trim();
+        }
+        this.automationReplyName = v.isEmpty() ? DEFAULT_AUTOMATION_REPLY_NAME : v;
+        save();
+    }
+
     @Override
     public boolean configure(StaplerRequest2 req, JSONObject json) throws FormException {
         // Feature flags are booleans and Stapler omits unchecked checkboxes, so start them all-off and
@@ -179,6 +204,18 @@ public class InteractiveInputGlobalConfig extends GlobalConfiguration {
     public static int retentionDaysOrDefault() {
         InteractiveInputGlobalConfig c = get();
         return c != null ? c.getRetentionDays() : DEFAULT_RETENTION_DAYS;
+    }
+
+    /**
+     * @return the configured global display label for automation (AI) replies, or the built-in
+     *     {@link #DEFAULT_AUTOMATION_REPLY_NAME default} when unset. Used by the REST comment endpoint to
+     *     label an automated reply that does not carry its own per-reply override.
+     */
+    @NonNull
+    public static String automationReplyNameOrDefault() {
+        InteractiveInputGlobalConfig c = get();
+        String v = c != null ? c.getAutomationReplyName() : null;
+        return v != null && !v.trim().isEmpty() ? v : DEFAULT_AUTOMATION_REPLY_NAME;
     }
 
     /** @return whether notification surfaces are scoped to the build starter. Off by default. */

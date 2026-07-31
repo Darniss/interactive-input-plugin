@@ -144,6 +144,36 @@ class ViewRestApiTest {
     }
 
     @Test
+    void editWithNoteRecordsItInTheVersionHistoryElseDefaults(JenkinsRule j) throws Exception {
+        secure(j);
+        seed("rw2", ReviewDocument.FORMAT_TEXT, "original", true, true); // editable
+
+        // An AI course-correction can carry a summary note that lands in the version history (v2), so the
+        // viewer's version dropdown shows why the edit happened rather than a generic "edited".
+        assertEquals(
+                200,
+                postJson(
+                        j.createWebClient().login("builder"),
+                        j,
+                        BASE + "views/rw2/edit",
+                        "{\"content\":\"revised by AI\",\"note\":\"Course-corrected: tightened wording\"}"));
+        JSONArray versions = json(get(j.createWebClient().login("builder"), j, BASE + "views/rw2"))
+                .getJSONArray("versions");
+        assertEquals(
+                "Course-corrected: tightened wording",
+                versions.getJSONObject(1).getString("note"),
+                "the supplied note is recorded on the new version");
+
+        // An edit with no note keeps the default label, so legacy clients are unaffected.
+        assertEquals(
+                200,
+                postJson(j.createWebClient().login("builder"), j, BASE + "views/rw2/edit", "{\"content\":\"again\"}"));
+        JSONArray after = json(get(j.createWebClient().login("builder"), j, BASE + "views/rw2"))
+                .getJSONArray("versions");
+        assertEquals("edited", after.getJSONObject(2).getString("note"), "a note-less edit falls back to 'edited'");
+    }
+
+    @Test
     void decisionApprovesThenConflictsOnRepeat(JenkinsRule j) throws Exception {
         secure(j);
         seed("v1", ReviewDocument.FORMAT_TEXT, "text", true, false);
@@ -208,6 +238,71 @@ class ViewRestApiTest {
     }
 
     @Test
+    void regenerateLoopEditsInPlaceWithNoteAfterRequestChanges(JenkinsRule j) throws Exception {
+        secure(j);
+        seed("rg", ReviewDocument.FORMAT_MARKDOWN, "# Title\n\nBody line.", true, true); // editable
+
+        // A reviewer comments then clicks "Request changes" -> the review becomes CHANGES_REQUESTED.
+        JSONObject afterRoot = json(postJsonResponse(
+                j.createWebClient().login("builder"),
+                j,
+                BASE + "views/rg/comments",
+                "{\"body\":\"expand this\",\"line\":3}"));
+        String rootId = afterRoot.getJSONArray("comments").getJSONObject(0).getString("id");
+        assertEquals(
+                200,
+                postJson(
+                        j.createWebClient().login("builder"),
+                        j,
+                        BASE + "views/rg/decision",
+                        "{\"decision\":\"request-changes\"}"));
+        assertEquals(ReviewStatus.CHANGES_REQUESTED, ViewStore.get().get("rg").getStatus());
+
+        // The regenerate-agent course-corrects the SAME review in place. CHANGES_REQUESTED must permit the
+        // edit (it previously 409'd on any decided state), and the summary note lands in the version history.
+        assertEquals(
+                200,
+                postJson(
+                        j.createWebClient().login("builder"),
+                        j,
+                        BASE + "views/rg/edit",
+                        "{\"content\":\"# Title\\n\\nExpanded body line.\",\"note\":\"Regenerated: expanded per review\"}"),
+                "editing a CHANGES_REQUESTED review is allowed for the regenerate loop");
+        JSONObject detail = json(get(j.createWebClient().login("builder"), j, BASE + "views/rg"));
+        JSONArray versions = detail.getJSONArray("versions");
+        assertEquals(
+                "Regenerated: expanded per review",
+                versions.getJSONObject(versions.size() - 1).getString("note"),
+                "the AI summary note is recorded on the new version");
+        assertEquals("CHANGES_REQUESTED", detail.getString("status"), "an in-place edit does not re-open the review");
+
+        // The automation also threads a reply under the reviewer's comment (still allowed post-decision),
+        // and the audit author stays the real, server-set identity.
+        JSONObject afterReply = json(postJsonResponse(
+                j.createWebClient().login("builder"),
+                j,
+                BASE + "views/rg/comments",
+                "{\"body\":\"expanded the body\",\"line\":3,\"parentId\":\"" + rootId + "\",\"automated\":true}"));
+        JSONObject reply = findReply(afterReply.getJSONArray("comments"));
+        assertEquals(rootId, reply.getString("parentId"));
+        assertEquals("builder", reply.getString("author"), "the audit author stays real for the automated reply");
+
+        // A finally-decided (APPROVED) review remains read-only — the relaxation is scoped to the
+        // "please course-correct" state only.
+        seed("rgApproved", ReviewDocument.FORMAT_MARKDOWN, "# T\n\nB.", true, true);
+        postJson(
+                j.createWebClient().login("builder"),
+                j,
+                BASE + "views/rgApproved/decision",
+                "{\"decision\":\"approve\"}");
+        assertEquals(
+                409,
+                postJson(
+                        j.createWebClient().login("builder"), j, BASE + "views/rgApproved/edit", "{\"content\":\"x\"}"),
+                "an approved review stays read-only");
+    }
+
+    @Test
     void commentAndResolveResponsesCarryContentSoTheLeftPaneSurvives(JenkinsRule j) throws Exception {
         secure(j);
         seed("cc", ReviewDocument.FORMAT_MARKDOWN, "# Title\n\nBody line.", true, false);
@@ -235,6 +330,88 @@ class ViewRestApiTest {
         assertTrue(
                 resolved.getJSONArray("comments").getJSONObject(0).getBoolean("resolved"),
                 "the comment must now be marked resolved");
+    }
+
+    @Test
+    void replyThreadsUnderParentWithLabelButKeepsRealAuditAuthor(JenkinsRule j) throws Exception {
+        secure(j);
+        seed("rp", ReviewDocument.FORMAT_MARKDOWN, "# Title\n\nBody line.", true, false);
+
+        // A reviewer leaves a root comment on line 3.
+        JSONObject afterRoot = json(postJsonResponse(
+                j.createWebClient().login("builder"),
+                j,
+                BASE + "views/rp/comments",
+                "{\"body\":\"tighten this\",\"line\":3}"));
+        String rootId = afterRoot.getJSONArray("comments").getJSONObject(0).getString("id");
+
+        // An automation replies to that comment with a display label. The audit author must stay the real,
+        // server-set Jenkins identity (builder) — the client-supplied label only changes what is displayed.
+        JSONObject afterReply = json(postJsonResponse(
+                j.createWebClient().login("builder"),
+                j,
+                BASE + "views/rp/comments",
+                "{\"body\":\"done\",\"line\":3,\"parentId\":\"" + rootId + "\",\"authorLabel\":\"AI response\"}"));
+        JSONObject reply = findReply(afterReply.getJSONArray("comments"));
+        assertEquals(rootId, reply.getString("parentId"), "the reply must be threaded under the root comment");
+        assertEquals("AI response", reply.getString("authorLabel"), "the display label must be preserved");
+        assertEquals("builder", reply.getString("author"), "the audit author is the real identity, never the label");
+    }
+
+    @Test
+    void automatedReplyUsesConfiguredGlobalLabelAndExplicitLabelWins(JenkinsRule j) throws Exception {
+        secure(j);
+        seed("au", ReviewDocument.FORMAT_MARKDOWN, "# Title\n\nBody line.", true, false);
+        InteractiveInputGlobalConfig cfg = InteractiveInputGlobalConfig.get();
+        cfg.setAutomationReplyName("JENKINS response");
+        cfg.save();
+
+        JSONObject afterRoot = json(postJsonResponse(
+                j.createWebClient().login("builder"), j, BASE + "views/au/comments", "{\"body\":\"root\",\"line\":3}"));
+        String rootId = afterRoot.getJSONArray("comments").getJSONObject(0).getString("id");
+
+        // automated:true with no explicit label -> the configured global default is applied server-side.
+        JSONObject afterAuto = json(postJsonResponse(
+                j.createWebClient().login("builder"),
+                j,
+                BASE + "views/au/comments",
+                "{\"body\":\"auto\",\"line\":3,\"parentId\":\"" + rootId + "\",\"automated\":true}"));
+        assertEquals(
+                "JENKINS response",
+                findReply(afterAuto.getJSONArray("comments")).getString("authorLabel"),
+                "an automated reply with no explicit label uses the configured global default");
+
+        // An explicit authorLabel overrides the global default even when automated:true.
+        JSONObject afterOverride = json(postJsonResponse(
+                j.createWebClient().login("builder"),
+                j,
+                BASE + "views/au/comments",
+                "{\"body\":\"custom\",\"line\":3,\"parentId\":\"" + rootId
+                        + "\",\"automated\":true,\"authorLabel\":\"Custom bot\"}"));
+        boolean sawCustom = false;
+        JSONArray comments = afterOverride.getJSONArray("comments");
+        for (int i = 0; i < comments.size(); i++) {
+            JSONObject c = comments.getJSONObject(i);
+            if (c.has("authorLabel") && "Custom bot".equals(c.getString("authorLabel"))) {
+                sawCustom = true;
+            }
+        }
+        assertTrue(sawCustom, "an explicit authorLabel must override the global default");
+    }
+
+    @Test
+    void replyToAMissingParentIsRejectedWith400(JenkinsRule j) throws Exception {
+        secure(j);
+        seed("bad", ReviewDocument.FORMAT_MARKDOWN, "# Title\n\nBody line.", true, false);
+
+        // A parentId that does not reference an existing comment is a client error (400), not a 500/404.
+        assertEquals(
+                400,
+                postJson(
+                        j.createWebClient().login("builder"),
+                        j,
+                        BASE + "views/bad/comments",
+                        "{\"body\":\"reply\",\"line\":3,\"parentId\":\"no-such-comment\"}"));
     }
 
     @Test
@@ -380,5 +557,16 @@ class ViewRestApiTest {
 
     private static JSONObject json(WebResponse r) {
         return JSONObject.fromObject(r.getContentAsString());
+    }
+
+    /** Return the first comment in the array that is a threaded reply (carries a {@code parentId}). */
+    private static JSONObject findReply(JSONArray comments) {
+        for (int i = 0; i < comments.size(); i++) {
+            JSONObject c = comments.getJSONObject(i);
+            if (c.has("parentId")) {
+                return c;
+            }
+        }
+        throw new AssertionError("no threaded reply found in comments: " + comments);
     }
 }

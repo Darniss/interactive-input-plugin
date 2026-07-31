@@ -43,6 +43,7 @@ class JcascRoundTripTest {
         // B18: the authorization switches moved from Appearance to System (unclassified.interactiveInput).
         assertTrue(cfg.isUserScopedNotifications(), "userScopedNotifications enabled in YAML (System)");
         assertTrue(cfg.isLockToBuildStarter(), "lockToBuildStarter enabled in YAML (System)");
+        assertEquals("JENKINS response", cfg.getAutomationReplyName(), "automationReplyName loaded from YAML");
     }
 
     @Test
@@ -75,6 +76,9 @@ class JcascRoundTripTest {
         assertTrue(
                 exported.contains("interactiveInputAppearance"), () -> "export missing appearance block:\n" + exported);
         assertTrue(exported.contains("hand-left"), () -> "export missing configured icon:\n" + exported);
+        assertTrue(
+                exported.contains("JENKINS response"),
+                () -> "export missing configured automation reply name:\n" + exported);
     }
 
     private static String resource(String name) {

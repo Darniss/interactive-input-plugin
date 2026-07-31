@@ -106,6 +106,32 @@ class InteractiveInputGlobalConfigTest {
     }
 
     @Test
+    void automationReplyNameDefaultsAndRoundTripsThroughTheUi(JenkinsRule j) throws Exception {
+        // Ask #2: the global display label for automation replies. Defaults to "AI response", round-trips
+        // through the System form, and a blank value falls back to the default (never an empty label).
+        InteractiveInputGlobalConfig cfg = InteractiveInputGlobalConfig.get();
+        assertNotNull(cfg);
+        assertEquals("AI response", cfg.getAutomationReplyName(), "default automation reply name");
+        assertEquals("AI response", InteractiveInputGlobalConfig.automationReplyNameOrDefault());
+
+        HtmlForm form = j.createWebClient().goTo("configure").getFormByName("config");
+        form.getInputByName("_.automationReplyName").setValue("JENKINS response");
+        j.submit(form);
+        assertEquals(
+                "JENKINS response",
+                InteractiveInputGlobalConfig.get().getAutomationReplyName(),
+                "the automation reply name must round-trip through the System UI");
+
+        HtmlForm blank = j.createWebClient().goTo("configure").getFormByName("config");
+        blank.getInputByName("_.automationReplyName").setValue("   ");
+        j.submit(blank);
+        assertEquals(
+                "AI response",
+                InteractiveInputGlobalConfig.get().getAutomationReplyName(),
+                "a blank label falls back to the built-in default");
+    }
+
+    @Test
     void newFlagsDefaultOnWhenAbsentFromAnUpgradedConfigXml(JenkinsRule j) {
         // Regression (found in live validation on 2.568.1): a controller upgrading from a build that
         // predates interactiveView/interactiveOutput has a saved <features> block without those elements.

@@ -65,6 +65,37 @@ class MarkdownRendererTest {
         assertEquals("", MarkdownRenderer.renderWithSourceLines(""));
     }
 
+    // ---- Per-element source-line anchoring (line-level inline commenting) ----
+    // Every commentable element (list item, table row, ...) — not just the top-level block — must carry
+    // its own data-source-line so a reviewer can comment the exact line without a manual line picker.
+
+    @Test
+    void renderWithSourceLinesTagsEachListItemWithItsOwnLine() {
+        String html = MarkdownRenderer.renderWithSourceLines("- one\n- two\n- three");
+        assertTrue(html.contains("<li"), "list items present: " + html);
+        assertTrue(html.contains("data-source-line=\"1\""), "item 1 anchors to line 1: " + html);
+        assertTrue(html.contains("data-source-line=\"2\""), "item 2 anchors to line 2: " + html);
+        assertTrue(html.contains("data-source-line=\"3\""), "item 3 anchors to line 3: " + html);
+    }
+
+    @Test
+    void renderWithSourceLinesTagsEachTableRowWithItsOwnLine() {
+        // Table: line 1 header, line 2 separator (not rendered), line 3 + line 4 body rows.
+        String html = MarkdownRenderer.renderWithSourceLines("| A | B |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |");
+        assertTrue(html.contains("<tr"), "table rows present: " + html);
+        assertTrue(html.contains("data-source-line=\"1\""), "header row anchors to line 1: " + html);
+        assertTrue(html.contains("data-source-line=\"3\""), "first body row anchors to line 3: " + html);
+        assertTrue(html.contains("data-source-line=\"4\""), "second body row anchors to line 4: " + html);
+    }
+
+    @Test
+    void renderWithSourceLinesDoesNotAnchorIndividualTableCells() {
+        // Cells share their row's line; anchoring each cell would clutter the row with duplicate markers.
+        String html = MarkdownRenderer.renderWithSourceLines("| A | B |\n|---|---|\n| 1 | 2 |");
+        assertFalse(html.contains("<td data-source-line"), "data cells must not be individually anchored: " + html);
+        assertFalse(html.contains("<th data-source-line"), "header cells must not be individually anchored: " + html);
+    }
+
     // ---- GitHub-Flavored Markdown extensions (tables / strikethrough / autolink) ----
     // Regression: GFM tables are not in the CommonMark core spec, so before the TablesExtension was
     // registered a pipe table rendered as a literal "|"-delimited paragraph (the Interactive View bug).
@@ -105,8 +136,75 @@ class MarkdownRendererTest {
         String html = MarkdownRenderer.renderWithSourceLines(md);
         // The source-line variant tags top-level blocks, so the table opens as <table data-source-line=..>.
         assertTrue(html.contains("<table"), "source-line variant must also render tables: " + html);
-        assertTrue(html.contains("data-source-line"), "the table becomes a commentable, source-anchored block: " + html);
+        assertTrue(
+                html.contains("data-source-line"), "the table becomes a commentable, source-anchored block: " + html);
         assertFalse(html.contains("|---|"), "no literal delimiter row: " + html);
+    }
+
+    // ---- Malformed table repair (the ATLAS "Planned Test Types" table did not render) ----
+    // A generator emitted a table whose header had one more column than its delimiter row; GFM only
+    // recognises a table when header and delimiter cell counts match, so it degraded to a "|" paragraph.
+
+    @Test
+    void repairsMismatchedTableDelimiterSoItRenders() {
+        // 4-column header, but the delimiter row only has 3 '---' cells (off by one) -> without repair
+        // this whole block renders as a literal "|"-delimited paragraph.
+        String md = "| A | B | C | D |\n|---|---|---|\n| 1 | 2 | 3 | 4 |";
+        String html = MarkdownRenderer.render(md);
+        assertTrue(html.contains("<table>"), "mismatched table must be repaired and rendered: " + html);
+        assertTrue(html.contains("<th>A</th>") && html.contains("<th>D</th>"), "all 4 headers present: " + html);
+        assertTrue(html.contains("<td>4</td>"), "the 4th column only renders once the delimiter is padded: " + html);
+        assertFalse(html.contains("|---|"), "no literal delimiter row may leak through: " + html);
+    }
+
+    @Test
+    void repairedTablePreservesColumnAlignment() {
+        // Header has 4 columns; delimiter has only 3 alignment cells (left, center, right) -> repaired to
+        // 4 columns, and the center/right alignment of the surviving cells must be preserved.
+        String md = "| L | C | R | X |\n|:--|:-:|--:|\n| a | b | c | d |";
+        String html = MarkdownRenderer.render(md);
+        assertTrue(html.contains("<table>"), "mismatched aligned table must be repaired: " + html);
+        assertTrue(html.contains("align=\"center\""), "center alignment must survive the repair: " + html);
+        assertTrue(html.contains("align=\"right\""), "right alignment must survive the repair: " + html);
+    }
+
+    @Test
+    void repairedTableRendersViaSourceLineVariantAndKeepsLineNumbers() {
+        // The document body uses renderWithSourceLines; the repair must work there too and must NOT change
+        // the line count (the heading stays on line 1, the table header on line 3) so anchoring is intact.
+        String md = "# T\n\n| A | B | C |\n|---|---|\n| 1 | 2 | 3 |";
+        String html = MarkdownRenderer.renderWithSourceLines(md);
+        assertTrue(html.contains("<table"), "source-line variant must also repair and render the table: " + html);
+        assertTrue(html.contains("data-source-line=\"1\""), "heading still anchors to line 1: " + html);
+        assertTrue(html.contains("data-source-line=\"3\""), "table still anchors to its header line 3: " + html);
+        assertFalse(html.contains("|---|"), "no literal delimiter row: " + html);
+    }
+
+    @Test
+    void wellFormedTableIsLeftUntouchedByTheRepairPass() {
+        // A correct table must render exactly as before (repair is a no-op when counts already match).
+        String md = "| Aspect | Value |\n|---|---|\n| length | 1..255 |";
+        String html = MarkdownRenderer.render(md);
+        assertTrue(html.contains("<table>") && html.contains("<th>Aspect</th>"), "still a table: " + html);
+        assertTrue(html.contains("<td>length</td>"), "still a body cell: " + html);
+    }
+
+    @Test
+    void pipeTextWithoutADelimiterRowIsNotTurnedIntoATable() {
+        // Safety: a paragraph containing pipes followed by a setext underline / thematic break ('---' has
+        // no pipe) must NOT be converted into a table by the repair pass.
+        String md = "Costs 5 | 10 | 20 dollars\n---\nmore text";
+        String html = MarkdownRenderer.render(md);
+        assertFalse(html.contains("<table"), "a dashline with no pipe must never become a table: " + html);
+    }
+
+    @Test
+    void mismatchedTableInsideFencedCodeIsLeftVerbatim() {
+        // Safety: content inside a ``` code fence must be preserved literally, never rewritten/rendered.
+        String md = "```\n| A | B | C |\n|---|---|\n```";
+        String html = MarkdownRenderer.render(md);
+        assertFalse(html.contains("<table"), "code-fence content must not become a table: " + html);
+        assertTrue(html.contains("|---|"), "the literal delimiter row must survive inside the code block: " + html);
     }
 
     @Test

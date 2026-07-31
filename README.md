@@ -85,7 +85,7 @@ Both pause a pipeline and wait for a human. Here is what changes:
 - 🪟 **Rich modal** — Markdown context panel (**expanded by default**), radio choices each with an optional rationale, optional free‑text with a live (server‑sanitised) preview, full keyboard/focus‑trap accessibility. Shared by the bell and every per‑project surface.
 - 📨 **Per‑pipeline notification preferences** — a *Configure* section (email/Teams/recipients/webhook) that persists intent now; delivery ships in a future release.
 - 🧩 **`askInteractive` step** — a durable pipeline step that returns the chosen id (or free text), throws on abort, and times out on SLA.
-- 📝 **`interactiveView` step** — publish a generated file — or a **whole folder / glob of dynamically‑created files** (`includes`/`dir`, one review per match) — for a **Confluence‑style review** inside Jenkins: **inline comments** (per line on the source, or per line on the rendered Markdown via a line picker) plus general comments, an editable review **copy** with version history (the original file is never touched), and **approve / request changes / reject / acknowledge** (or a read‑only `mode: 'info'` viewer). Non‑blocking by default, or `wait: true` to pause the pipeline on the decision — which returns the reviewer's **inline comments** so a generator (e.g. an AI agent) can regenerate on *Request changes*. The per‑job page groups reviews by report/folder with **Needs‑approval vs Informational** sections and filters; content is snapshotted durably; code/HTML is shown as **escaped, syntax‑highlighted source** (never executed) via `prism-api`.
+- 📝 **`interactiveView` step** — publish a generated file — or a **whole folder / glob of dynamically‑created files** (`includes`/`dir`, one review per match) — for a **Confluence‑style review** inside Jenkins: **per‑element inline comments** (click the exact heading, paragraph, list item or table row — on the source *or* the rendered Markdown — no line‑number dropdown) plus general comments, **threaded replies** (an automation can answer under a reviewer's comment with a configurable display name — default *AI response* — while the audit author stays the real identity), an editable review **copy** with version history (the original file is never touched; edits are allowed while a review is *open* **and** while *changes are requested*), and **approve / request changes / reject / acknowledge** (or a read‑only `mode: 'info'` viewer). Non‑blocking by default, or `wait: true` to pause the pipeline on the decision — which returns the reviewer's **inline comments** so a generator (e.g. an AI agent) can regenerate on *Request changes*. The per‑job page groups reviews by report/folder with **Needs‑approval vs Informational** sections and filters; content is snapshotted durably; **malformed GFM tables are repaired** before rendering; code/HTML is shown as **escaped, syntax‑highlighted source** (never executed) via `prism-api`.
 - 📊 **`interactiveOutput` step** — publish per‑build statistics (cost, carbon footprint, resource usage, …) as **KPI cards + a filterable/sortable table** on the build page and a **per‑job chart** across builds via `echarts-api`, with a selectable `chartType` (**line / bar / pie / time‑series**) per report — time‑series plots date‑labelled metrics with a Time / Day / Month / Year granularity toggle.
 - 🌐 **Versioned REST API** — `GET/POST` JSON under `/interactive-input/api/v1/`, permission‑checked, CSRF‑protected, with a stable envelope.
 - 🌉 **`inputStepBridge`** — opt‑in reconciliation that mirrors *existing* native `input` steps into the bell/modal/API, forwarding answers back to the native step. Zero pipeline changes.
@@ -142,8 +142,8 @@ A restart mid‑pause is safe: the question is persisted, and the build re‑att
 
 1. **Publish.** The pipeline — or an AI agent — calls `interactiveView(file: 'report.md', …)`, or points it at a folder / glob of dynamically generated files (one review per match). Each file becomes a durable, editable review **copy**; the original on disk is never touched.
 2. **Notice.** The review surfaces on the header bell, the per‑job **Interactive View** page (grouped by report/folder, with *Needs‑approval vs Informational* sections and filters), and the build‑history badge — just like a pending question.
-3. **Review.** A reviewer reads the file (rendered Markdown, or escaped syntax‑highlighted source — never executed), leaves **inline comments** (per line on either view) and general comments, and picks **Approve**, **Request changes**, **Reject**, or **Acknowledge**. `mode: 'info'` makes it a read‑only viewer.
-4. **Resume / regenerate.** With `wait: true` the step blocks on the decision and returns it **together with the reviewer's inline comments**, so a generator can regenerate the file from those comments and publish a new version (the editor keeps a **version history**). Without `wait` the publish is non‑blocking.
+3. **Review.** A reviewer reads the file (rendered Markdown, or escaped syntax‑highlighted source — never executed), leaves **inline comments** (click the exact heading / paragraph / list item / table row on either view) and general comments, and picks **Approve**, **Request changes**, **Reject**, or **Acknowledge**. `mode: 'info'` makes it a read‑only viewer.
+4. **Resume / regenerate.** With `wait: true` the step blocks on the decision and returns it **together with the reviewer's inline comments**, so a generator can regenerate the file from those comments. The generator can then either publish a fresh review or **edit the existing review copy in place** — permitted even after *Request changes* — recording a new version (the editor keeps a **version history**) and posting a **threaded reply** under each reviewer comment (shown with a configurable name such as *AI response*). Without `wait` the publish is non‑blocking.
 
 `interactiveOutput` needs no pause at all — it is a **non‑blocking** post/summary step: it records the build's statistics and renders them as KPI cards + a filterable table on the build page and a trend chart across builds on the job page.
 
@@ -207,7 +207,8 @@ When this build reaches the step it pauses, the bell lights up for everyone allo
 
 Publish a generated file for review inside Jenkins — like commenting on a Confluence page. The file's
 content is **snapshotted** into a durable store at step time (so the review survives workspace cleanup);
-Markdown is rendered safely, while HTML and any programming language are shown as **escaped,
+Markdown is rendered safely (and **malformed GFM tables — e.g. a delimiter row with fewer cells than the
+header — are repaired** before rendering), while HTML and any programming language are shown as **escaped,
 syntax‑highlighted source** (never executed). Runs inside a `node { }` (it needs a workspace to read the
 file).
 
@@ -240,7 +241,7 @@ Provide **exactly one** file source: `file`, `includes`, or `dir`.
 | `reportName` | String | file base name | Name shown as the review title / section heading; matched files are grouped under it. |
 | `title` | String | `reportName` | Optional explicit page title (single‑file only; globbed files title from their relative path). |
 | `format` | String | auto (by extension) | Override rendering: `markdown` \| `html` \| `code` \| `text`. |
-| `commentable` | boolean | `true` | Allow inline comments (per source line, **and** per line in the rendered Markdown via a line picker) plus general comments. |
+| `commentable` | boolean | `true` | Allow inline comments anchored to the exact element clicked (heading, paragraph, list item, table row) on the source **or** the rendered Markdown, plus general comments and threaded replies. |
 | `editable` | boolean | `false` | Allow editing the durable review **copy** (versioned; the original file is untouched). |
 | `notify` | boolean | `true` | Surface the review in the notification bell's **Reviews** section. |
 | `wait` | boolean | `false` | Block the pipeline until a decision (or SLA); otherwise publish and continue. **Single file only** — a glob resolving to more than one file is rejected. |
@@ -250,8 +251,12 @@ Provide **exactly one** file source: `file`, `includes`, or `dir`.
 **Where it shows** — an **"Interactive View"** link in the run's left sidebar opens the two‑pane editor
 (rendered document / highlighted source on the left; comment threads on the right, with edit‑copy
 history and Approve / Request changes / Reject / Acknowledge — the decision toolbar is hidden for
-`mode: 'info'` items). Add an inline comment by hovering a source line and clicking the **+**, or, in the
-rendered view, selecting a block and picking the exact source line to anchor the comment to. The sidebar
+`mode: 'info'` items). Add an inline comment by hovering the element you want to annotate — a source
+line, or a heading / paragraph / list item / table row in the rendered Markdown — and clicking the **+**
+that appears in the gutter; the comment is anchored to that element's **exact source line** (there is no
+line‑number dropdown). An automation can post a **threaded reply** under a reviewer's comment via the REST
+API, shown with a configurable display name (default *AI response*) while the recorded audit author stays
+the real Jenkins/token identity. The sidebar
 link carries a **live count badge** of open reviews (job‑ and build‑scoped,
 updated without a page reload) and stays visible after the build completes, so decided reviews' comments
 and version history remain reachable. The build console gets an anchored deep‑link, the build‑history row
@@ -288,6 +293,12 @@ node {
   }
 }
 ```
+
+For an **out‑of‑band** loop — where an external agent (not the pipeline) course‑corrects a review after
+*Request changes* — the agent **edits the durable copy in place** (`POST …/views/{id}/edit` with a version
+`note`) and posts a **threaded reply** under each reviewer comment (`POST …/views/{id}/comments` with
+`parentId` + `automated:true`). Editing a `CHANGES_REQUESTED` review is allowed and does **not** re‑open
+it — see the [REST API](#rest-api) section for the `/views/{id}/edit` and `/views/{id}/comments` shapes.
 
 ---
 
@@ -525,6 +536,13 @@ Base path: `/interactive-input/api/v1/`. All responses are JSON. Mutating endpoi
 | `POST` | `/questions/{id}/answer` | Item/Build (or submitter) | Submit `{"choiceId":"…"}` or `{"freeText":"…"}`. |
 | `POST` | `/questions/{id}/abort` | Item/Build (or submitter) | Cancel the input (delivers an abort to the pipeline). |
 | `POST` | `/preview` | Overall/Read | Render Markdown → safe HTML (used by the modal's free‑text preview). |
+| `GET` | `/views` | Overall/Read | Reviews **you** can read. `?job=<fullName>` ⇒ that job's open, notify‑enabled reviews; `?job=…&build=<n>` ⇒ that build's reviews (any status, for audit); `?all=true` ⇒ every open review (**Overall/Administer**). |
+| `GET` | `/views/{id}` | Item/Read on source job | Full review: metadata, current `content`, `renderedHtml` (Markdown only, with `data-source-line` anchors) and `comments` (each with sanitised `bodyHtml`, plus `parentId`/`authorLabel` when threaded). `404` if missing *or* unreadable. |
+| `GET` | `/views/{id}/raw?version=n` | Item/Read | One content version as `{version, content}` (defaults to the current version). |
+| `POST` | `/views/{id}/comments` | Item/Build (or submitter) | Add a comment: `{"body":"…","line":N,"parentId":"…","authorLabel":"…","automated":true}`. Omit `line` (or `-1`) ⇒ general note; `parentId` ⇒ threaded reply (`400` if the parent is missing); `authorLabel`/`automated` set the display name (the audit author stays the caller). |
+| `POST` | `/views/{id}/edit` | Item/Build (or submitter) | Replace the editable copy: `{"content":"…","note":"…"}` (new version + optional history note). Requires `editable:true`; allowed while **OPEN** *or* **CHANGES_REQUESTED**, else `409`. |
+| `POST` | `/views/{id}/decision` | Item/Build (or submitter) | Record a decision: `{"decision": "…"}` where the value is `approve`, `reject`, `acknowledge` or `request-changes`. |
+| `POST` | `/views/{id}/resolveComment` | Item/Build (or submitter) | Toggle a comment resolved: `{"commentId":"…","resolved":true}`. |
 
 ### Worked example (`curl`)
 
@@ -632,6 +650,7 @@ unclassified:
     sla:
       defaultMinutes: 0          # default SLA when a step omits slaMinutes (0 = no SLA)
     retentionDays: 7             # keep answered/aborted/expired questions this long
+    automationReplyName: "AI response"  # display label for automation replies posted under an interactiveView comment
     # Authorization (default off; only ever RESTRICT access on top of the Job/Build + submitter checks)
     userScopedNotifications: false     # show each viewer only their own build's questions (+ ownerless)
     lockToBuildStarter: false          # only the build starter (or an admin) may answer; others view-only

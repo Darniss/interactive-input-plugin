@@ -15,6 +15,7 @@ unclassified:
     retentionDays: 14
     userScopedNotifications: true
     lockToBuildStarter: true
+    automationReplyName: "JENKINS response"
 appearance:
   interactiveInputAppearance:
     notificationCentre: true

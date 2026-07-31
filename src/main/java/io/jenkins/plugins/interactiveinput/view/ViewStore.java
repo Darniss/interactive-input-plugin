@@ -141,23 +141,66 @@ public class ViewStore {
     }
 
     /**
-     * Add a comment. Callers must pre-check permissions (the REST/UI layer's responsibility).
+     * Add a root comment. Callers must pre-check permissions (the REST/UI layer's responsibility).
      *
      * @throws IllegalStateException if the document is missing or not commentable
      */
     @NonNull
     public ReviewComment addComment(@NonNull String id, int line, @NonNull String body, @NonNull String byUserId) {
+        return addComment(id, line, body, byUserId, null, null);
+    }
+
+    /**
+     * Add a comment, optionally as a threaded reply and/or with a display-only author label. Callers must
+     * pre-check permissions (the REST/UI layer's responsibility). The {@code byUserId} audit author is
+     * always the real, server-set identity; {@code authorLabel} only changes what the viewer displays.
+     *
+     * <p>Threads are kept one level deep: a reply whose {@code parentId} points at another reply is
+     * re-parented to that reply's root, so every stored reply references a root comment and the viewer can
+     * render a simple parent&rarr;replies tree.
+     *
+     * @param parentId    the comment being replied to, or {@code null} for a root comment
+     * @param authorLabel display-only label (e.g. "AI response"), or {@code null} to show the real author
+     * @throws IllegalStateException    if the document is missing or not commentable
+     * @throws IllegalArgumentException if {@code parentId} does not reference an existing comment
+     */
+    @NonNull
+    public ReviewComment addComment(
+            @NonNull String id,
+            int line,
+            @NonNull String body,
+            @NonNull String byUserId,
+            @CheckForNull String parentId,
+            @CheckForNull String authorLabel) {
         ReviewDocument doc = require(id);
         ReviewComment c;
         synchronized (doc) {
             if (!doc.isCommentable()) {
                 throw new IllegalStateException("Review " + id + " is not commentable");
             }
-            c = new ReviewComment(UUID.randomUUID().toString(), line, body, byUserId, System.currentTimeMillis());
+            String effectiveParent = null;
+            if (parentId != null) {
+                ReviewComment parent = doc.findComment(parentId);
+                if (parent == null) {
+                    throw new IllegalArgumentException("No such parent comment: " + parentId);
+                }
+                // Flatten reply-to-a-reply onto the same root (keeps threads one level deep).
+                effectiveParent = parent.getParentId() != null ? parent.getParentId() : parentId;
+            }
+            c = new ReviewComment(
+                    UUID.randomUUID().toString(),
+                    line,
+                    body,
+                    byUserId,
+                    System.currentTimeMillis(),
+                    effectiveParent,
+                    authorLabel);
             doc.addComment(c);
         }
         save();
-        LOGGER.log(Level.FINE, "review {0} commented by {1} (line={2})", new Object[] {id, byUserId, line});
+        LOGGER.log(Level.FINE, "review {0} commented by {1} (line={2}, parent={3})", new Object[] {
+            id, byUserId, line, parentId
+        });
         return c;
     }
 
@@ -179,25 +222,42 @@ public class ViewStore {
     }
 
     /**
-     * Save an edit to the durable review copy as a new content version. Callers must pre-check
-     * permissions and that the document is editable.
+     * Save an edit to the durable review copy as a new content version with the default "edited" note.
      *
      * @return the new version index
-     * @throws IllegalStateException if the document is missing, not editable, or already decided
+     * @throws IllegalStateException if the document is missing, not editable, or in a final decided state
+     *     (any decision other than {@code CHANGES_REQUESTED}; see {@link ReviewStatus#allowsEdit()})
      */
     public int saveEdit(@NonNull String id, @NonNull String newContent, @NonNull String byUserId) {
+        return saveEdit(id, newContent, byUserId, null);
+    }
+
+    /**
+     * Save an edit to the durable review copy as a new content version, recording an optional display-only
+     * {@code note} (e.g. an AI course-correction summary) in the version history. Callers must pre-check
+     * permissions and that the document is editable.
+     *
+     * @param note a short edit summary shown in the version dropdown, or {@code null} for the default label
+     * @return the new version index
+     * @throws IllegalStateException if the document is missing, not editable, or in a final decided state
+     *     (any decision other than {@code CHANGES_REQUESTED}; see {@link ReviewStatus#allowsEdit()})
+     */
+    public int saveEdit(
+            @NonNull String id, @NonNull String newContent, @NonNull String byUserId, @CheckForNull String note) {
         ReviewDocument doc = require(id);
         int version;
         synchronized (doc) {
             if (!doc.isEditable()) {
                 throw new IllegalStateException("Review " + id + " is not editable");
             }
-            if (doc.getStatus().isDecided()) {
+            // OPEN and CHANGES_REQUESTED both permit edits: the latter is the "please course-correct"
+            // state that the regenerate loop targets. Every other terminal decision is final/read-only.
+            if (!doc.getStatus().allowsEdit()) {
                 throw new IllegalStateException("Review " + id + " is already " + doc.getStatus());
             }
             version = doc.getCurrentVersion() + 1;
             writeContent(id, version, newContent);
-            doc.addVersion(byUserId, System.currentTimeMillis());
+            doc.addVersion(byUserId, System.currentTimeMillis(), note);
         }
         save();
         LOGGER.log(Level.FINE, "review {0} edited by {1} (v{2})", new Object[] {id, byUserId, version});

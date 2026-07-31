@@ -95,17 +95,23 @@ All notable changes to this project are documented here. The format follows
     (approve / request changes / reject / acknowledge) and can block/notify; `mode: 'info'` is a
     read-only, still-commentable viewer with no decision. "Needs approval vs not" is expressed per call
     (different glob + `mode`/`notify`).
-  - Reviewers can add **inline comments** — per source line in the Source view **and** per line in the
-    Rendered view: selecting a rendered Markdown block opens a **line picker** that anchors the comment to
-    the exact source line inside that block (both views map to the same source line, so they round-trip
+  - Reviewers can add **inline comments** — per source line in the Source view **and** per element in the
+    Rendered view: every commentable element (heading, paragraph, list item, table row, …) carries its own
+    `data-source-line`, so hovering it reveals a **+** that anchors the comment to that exact line
+    directly — no line-number dropdown (both views map to the same source line, so they round-trip
     either way) — plus general comments, edit the durable
     review **copy** with **version history** (the original workspace file is never modified), and
     **approve / request changes / reject / acknowledge**. Non-blocking by default (publish and continue);
     `wait: true` pauses the pipeline until a decision (or the SLA), returning
     `{id, status, decidedBy, version, content, comments}` — none of the decisions abort the run (mirrors
     the durable, restart-safe `askInteractive` pattern). **Request changes** (`CHANGES_REQUESTED`) returns
-    the inline `comments` (`{id, line, body, author, createdTs, resolved}`) so a generator — e.g. an AI
-    agent — can course-correct the file and re-publish: a human-in-the-loop **regenerate loop**.
+    the inline `comments` (`{id, line, body, author, createdTs, resolved, parentId, authorLabel}`) so a
+    generator — e.g. an AI agent — can course-correct the review (**edit it in place** while it is
+    `CHANGES_REQUESTED`, or re-publish): a human-in-the-loop **regenerate loop**. The automation can post its result as a **threaded reply** nested under the
+    reviewer's comment (`parentId`), shown with a configurable display label and an "automation" chip while
+    the audit `author` stays the real, server-set Jenkins identity, and record an edit **summary note** in
+    the version history. The label defaults to **Manage Jenkins → System → *Automation reply name*** (default
+    "AI response", JCasC `unclassified.interactiveInput.automationReplyName`) with a per-reply override.
   - Surfaces: a dedicated **"Interactive View"** left-sidebar link (with a **live open-review count
     badge**, job- and build-scoped, updated without a page reload — and, in the experimental layout's
     **"more actions"** overflow menu, the pending count rendered inline via the action display name)
@@ -125,8 +131,11 @@ All notable changes to this project are documented here. The format follows
     flow through the same scoped store methods, so the bell and sidebar inherit scoping.
   - REST under `/interactive-input/api/v1/views`: `GET /views` (scoped `?job=`, `?job=&build=`,
     `?all=`), `GET /views/{id}`, `GET /views/{id}/raw?version=n`, and `@RequirePOST`
-    `comments` / `edit` / `decision` / `resolveComment` — permission-checked (`Item.READ` to view,
-    `Item.BUILD`/submitter to contribute, `Jenkins.ADMINISTER` for `?all=true`), CSRF-crumbed, 404 no-leak.
+    `comments` (optional `parentId` to thread a reply; `authorLabel`/`automated` for a display-only label,
+    length-bounded and rendered as text) / `edit` (optional `note` recorded in the version history) /
+    `decision` / `resolveComment` — permission-checked (`Item.READ` to view, `Item.BUILD`/submitter to
+    contribute, `Jenkins.ADMINISTER` for `?all=true`), CSRF-crumbed, 404 no-leak. The audit `author` is
+    always server-set, never client-supplied.
 - **`interactiveOutput` pipeline step + statistics widgets** — publish per-build / per-job statistics
   (e.g. cost report, carbon footprint, resource usage):
   - `interactiveOutput(reportName, metrics: [[label, value, unit, key], …], chartType, notify)` stores a
@@ -247,6 +256,26 @@ All notable changes to this project are documented here. The format follows
   (borders, header shading, zebra rows, per-column alignment) in the document viewer (`viewer.css`) and
   the modal/free-text preview (`bell.css`). Task-list items remain unsupported (that extension is not
   shipped by `markdown-formatter`, and bundling a standalone jar would break the packaging convention).
+- **Interactive View now renders malformed GFM tables whose delimiter row is a column short.** Observed
+  failure: a real ATLAS document table with a 21-column header but a 20-cell delimiter row degraded to a
+  literal `|`-delimited paragraph, because GFM/commonmark requires the header and delimiter column counts
+  to match. Root cause: the generator emitted a short delimiter row; commonmark then never recognised the
+  block as a table. Fix: `MarkdownRenderer` gains a conservative `normalizeGfmTables` pass (run before both
+  the plain and source-line renders) that, only when a pipe line is immediately followed by a delimiter
+  row, rebuilds the delimiter to the header's column count — preserving `:--`/`:-:`/`--:` alignment and
+  padding missing cells with `---`. It never fabricates a table from non-table text (a delimiter row must
+  already be present), never rewrites content inside fenced code blocks, and emits no HTML — commonmark
+  still escapes every cell, so a `<script>` in a repaired table stays escaped.
+- **The regenerate loop can now edit a review in place after "Request changes".** Observed failure:
+  `POST /views/{id}/edit` returned **409** once a reviewer clicked *Request changes*, so an automation
+  (the `ii-view-regenerate-agent` sample) could not record its course-corrected version or summary note on
+  the very review it was asked to fix. Root cause: `ViewStore.saveEdit` rejected every non-`OPEN` status
+  via `ReviewStatus.isDecided()`, but `CHANGES_REQUESTED` exists precisely to invite edits. Fix: a new
+  `ReviewStatus.allowsEdit()` (true for `OPEN` **and** `CHANGES_REQUESTED`) gates `saveEdit`, so the
+  regenerate loop can version the copy and attach its `note` in place while every other terminal decision
+  (`APPROVED`/`REJECTED`/`ACKNOWLEDGED`/`EXPIRED`/`ABORTED`) stays read-only; threaded automation replies
+  were already allowed post-decision. Editing does not silently re-open the review (the status is
+  unchanged).
 - **Deleting a build now clears its interactive notifications and marks its review page.** Observed
   failure: after a build was deleted, its `askInteractive` question and its Interactive View review
   still counted toward the header-bell total and the sidebar badge, and the per-job Interactive View
