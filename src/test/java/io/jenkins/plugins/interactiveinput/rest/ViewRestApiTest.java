@@ -9,7 +9,13 @@ import io.jenkins.plugins.interactiveinput.config.InteractiveInputGlobalConfig;
 import io.jenkins.plugins.interactiveinput.view.ReviewDocument;
 import io.jenkins.plugins.interactiveinput.view.ReviewStatus;
 import io.jenkins.plugins.interactiveinput.view.ViewStore;
+import java.io.ByteArrayOutputStream;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 import jenkins.model.Jenkins;
 import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
@@ -333,6 +339,41 @@ class ViewRestApiTest {
     }
 
     @Test
+    void highlightCommentCarriesVerbatimQuoteWhileGeneralCommentDropsIt(JenkinsRule j) throws Exception {
+        secure(j);
+        seed("hq", ReviewDocument.FORMAT_MARKDOWN, "# Title\n\nA long paragraph line to highlight.", true, false);
+
+        // A reviewer highlights only a sub-phrase of a line and comments: the server stores and returns that
+        // verbatim snippet (quote) alongside the whole-line anchor, so the viewer can show back exactly what
+        // was selected instead of collapsing it to the whole line.
+        String snippet = "sub-phrase of a line";
+        JSONObject after = json(postJsonResponse(
+                j.createWebClient().login("builder"),
+                j,
+                BASE + "views/hq/comments",
+                "{\"body\":\"why this?\",\"line\":3,\"quote\":\"" + snippet + "\"}"));
+        JSONObject c = after.getJSONArray("comments").getJSONObject(0);
+        assertEquals(3, c.getInt("line"), "the comment still anchors at the highlighted line");
+        assertEquals(snippet, c.getString("quote"), "the verbatim highlighted snippet must be preserved");
+
+        // A general (unanchored) comment carries no quote — a quote is only meaningful for a line anchor.
+        JSONObject afterGeneral = json(postJsonResponse(
+                j.createWebClient().login("builder"),
+                j,
+                BASE + "views/hq/comments",
+                "{\"body\":\"overall note\",\"quote\":\"ignored\"}"));
+        boolean sawGeneralQuote = false;
+        JSONArray all = afterGeneral.getJSONArray("comments");
+        for (int i = 0; i < all.size(); i++) {
+            JSONObject cc = all.getJSONObject(i);
+            if (cc.optInt("line", -1) < 1 && cc.has("quote")) {
+                sawGeneralQuote = true;
+            }
+        }
+        assertFalse(sawGeneralQuote, "a general comment must not carry a quote");
+    }
+
+    @Test
     void replyThreadsUnderParentWithLabelButKeepsRealAuditAuthor(JenkinsRule j) throws Exception {
         secure(j);
         seed("rp", ReviewDocument.FORMAT_MARKDOWN, "# Title\n\nBody line.", true, false);
@@ -484,6 +525,89 @@ class ViewRestApiTest {
         assertFalse(bodyHtml.contains("javascript:"), "comment javascript: must be sanitised: " + bodyHtml);
     }
 
+    // ---- Downloads (item #1): a single file, and a whole-group ZIP; Item.READ gated, 404 no-leak ----
+
+    @Test
+    void downloadReturnsFileContentAsAttachment(JenkinsRule j) throws Exception {
+        secure(j);
+        seedFile("d1", "notes.md", "hello world", null);
+
+        WebResponse resp = get(j.createWebClient().login("builder"), j, BASE + "views/d1/download");
+        assertEquals(200, resp.getStatusCode());
+        String cd = resp.getResponseHeaderValue("Content-Disposition");
+        assertTrue(cd != null && cd.contains("attachment"), "must be an attachment: " + cd);
+        assertTrue(cd.contains("notes.md"), "the file basename must be the download name: " + cd);
+        assertEquals("nosniff", resp.getResponseHeaderValue("X-Content-Type-Options"), "must forbid MIME sniffing");
+        assertEquals("hello world", resp.getContentAsString(), "the body is the current version's content");
+    }
+
+    @Test
+    void downloadIsGatedByItemReadAndHidesExistence(JenkinsRule j) throws Exception {
+        secure(j);
+        seedFile("d1", "notes.md", "hello", null);
+
+        // Item.READ (reader) is sufficient — a download is a read, not a contribution (Item.BUILD).
+        assertEquals(
+                200,
+                get(j.createWebClient().login("reader"), j, BASE + "views/d1/download")
+                        .getStatusCode());
+        // Anonymous lacks Item.READ -> 404 (never reveal existence); an unknown id is also 404.
+        assertEquals(
+                404, get(j.createWebClient(), j, BASE + "views/d1/download").getStatusCode());
+        assertEquals(
+                404,
+                get(j.createWebClient().login("builder"), j, BASE + "views/nope/download")
+                        .getStatusCode());
+    }
+
+    @Test
+    void downloadGroupZipsEveryReadableGroupMember(JenkinsRule j) throws Exception {
+        secure(j);
+        // Two files published together share a groupId; a third, unrelated file must NOT be included.
+        seedFile("g1a", "a.md", "AAA", "grp");
+        seedFile("g1b", "b.md", "BBB", "grp");
+        seedFile("other", "c.md", "CCC", null);
+
+        WebResponse resp = get(j.createWebClient().login("builder"), j, BASE + "views/g1a/downloadGroup");
+        assertEquals(200, resp.getStatusCode());
+        assertTrue(
+                resp.getContentType().contains("zip"), "a group download is a zip archive: " + resp.getContentType());
+        String cd = resp.getResponseHeaderValue("Content-Disposition");
+        assertTrue(cd != null && cd.contains("attachment") && cd.contains(".zip"), "zip attachment: " + cd);
+
+        Map<String, String> entries = unzip(resp);
+        assertEquals(2, entries.size(), "only the two group members are archived: " + entries.keySet());
+        assertEquals("AAA", entries.get("a.md"));
+        assertEquals("BBB", entries.get("b.md"));
+        assertFalse(entries.containsKey("c.md"), "an unrelated file must not leak into the group zip");
+    }
+
+    @Test
+    void downloadGroupForALoneFileIsASingleEntryZip(JenkinsRule j) throws Exception {
+        secure(j);
+        seedFile("solo", "solo.md", "SOLO", null); // ungrouped -> getGroupId() falls back to its own id
+
+        WebResponse resp = get(j.createWebClient().login("builder"), j, BASE + "views/solo/downloadGroup");
+        assertEquals(200, resp.getStatusCode());
+        Map<String, String> entries = unzip(resp);
+        assertEquals(1, entries.size(), "a lone file yields a one-entry archive: " + entries.keySet());
+        assertEquals("SOLO", entries.get("solo.md"));
+    }
+
+    @Test
+    void downloadGroupIsGatedByItemReadAndHidesExistence(JenkinsRule j) throws Exception {
+        secure(j);
+        seedFile("g1a", "a.md", "AAA", "grp");
+
+        assertEquals(
+                404,
+                get(j.createWebClient(), j, BASE + "views/g1a/downloadGroup").getStatusCode());
+        assertEquals(
+                404,
+                get(j.createWebClient().login("builder"), j, BASE + "views/nope/downloadGroup")
+                        .getStatusCode());
+    }
+
     // ---- helpers ----
 
     private static void secure(JenkinsRule j) throws Exception {
@@ -519,6 +643,49 @@ class ViewRestApiTest {
                 null,
                 null);
         return ViewStore.get().submit(doc, content);
+    }
+
+    /** Seed a document with a specific file name and group id (for the download tests). */
+    private static ReviewDocument seedFile(String id, String fileName, String content, String groupId) {
+        ReviewDocument doc = new ReviewDocument(
+                id,
+                JOB,
+                1,
+                "Report",
+                "Title",
+                fileName,
+                ReviewDocument.FORMAT_TEXT,
+                "text",
+                "tester",
+                System.currentTimeMillis(),
+                true,
+                false,
+                true,
+                false,
+                null,
+                0L,
+                groupId,
+                null);
+        return ViewStore.get().submit(doc, content);
+    }
+
+    /** Read a downloaded ZIP body into an ordered {@code entryName -> UTF-8 content} map. */
+    private static Map<String, String> unzip(WebResponse resp) throws Exception {
+        Map<String, String> out = new LinkedHashMap<>();
+        try (ZipInputStream zis = new ZipInputStream(resp.getContentAsStream(), StandardCharsets.UTF_8)) {
+            ZipEntry e;
+            while ((e = zis.getNextEntry()) != null) {
+                ByteArrayOutputStream bos = new ByteArrayOutputStream();
+                byte[] buf = new byte[4096];
+                int n;
+                while ((n = zis.read(buf)) != -1) {
+                    bos.write(buf, 0, n);
+                }
+                out.put(e.getName(), bos.toString(StandardCharsets.UTF_8));
+                zis.closeEntry();
+            }
+        }
+        return out;
     }
 
     private static WebResponse get(JenkinsRule.WebClient wc, JenkinsRule j, String path) throws Exception {

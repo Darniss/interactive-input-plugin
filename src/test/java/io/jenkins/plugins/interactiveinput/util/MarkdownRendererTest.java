@@ -198,13 +198,65 @@ class MarkdownRendererTest {
         assertFalse(html.contains("<table"), "a dashline with no pipe must never become a table: " + html);
     }
 
+    // ---- Un-fencing a bare-fenced pipe table (Interactive View: "table inside a bullet not rendered") ----
+    // Item #2: some report generators wrap a table in a bare ``` fence (no language). CommonMark then
+    // (correctly per spec) renders it verbatim as <pre><code> "|"-delimited text. A bare fence whose body is
+    // exactly a pipe table is unwrapped so it renders as a real <table>. A fence WITH a language, or a bare
+    // fence with any non-table content, must still be preserved verbatim as code.
+
     @Test
-    void mismatchedTableInsideFencedCodeIsLeftVerbatim() {
-        // Safety: content inside a ``` code fence must be preserved literally, never rewritten/rendered.
-        String md = "```\n| A | B | C |\n|---|---|\n```";
+    void bareFencedPipeTableIsUnwrappedAndRenders() {
+        String md = "```\n| A | B |\n|---|---|\n| 1 | 2 |\n```";
         String html = MarkdownRenderer.render(md);
-        assertFalse(html.contains("<table"), "code-fence content must not become a table: " + html);
+        assertTrue(html.contains("<table>"), "a bare-fenced pipe table must render as a table: " + html);
+        assertTrue(html.contains("<th>A</th>") && html.contains("<td>1</td>"), "header + body cells: " + html);
+        assertFalse(html.contains("<pre>"), "the fence must be unwrapped, not kept as a code block: " + html);
+        assertFalse(html.contains("|---|"), "no literal delimiter row may leak through: " + html);
+    }
+
+    @Test
+    void bareFencedPipeTableInsideListItemRenders() {
+        // The exact reported case: the table is fenced inside a bullet. This also proves CommonMark renders
+        // a table nested within an <li> (blanking the fence lines keeps the table indented under the item).
+        String md = "- Item with a table:\n    ```\n    | A | B |\n    | --- | --- |\n    | 1 | 2 |\n    ```";
+        String html = MarkdownRenderer.render(md);
+        assertTrue(html.contains("<li>"), "list item present: " + html);
+        assertTrue(html.contains("<table>"), "the in-bullet fenced table must render as a table: " + html);
+        assertTrue(html.contains("<th>A</th>") && html.contains("<td>1</td>"), "header + body cells: " + html);
+        assertFalse(html.contains("<pre>"), "the fence must be unwrapped, not kept as a code block: " + html);
+    }
+
+    @Test
+    void languagedFenceWithPipeTableBodyIsLeftAsCode() {
+        // Safety: a fence WITH a language is an intentional code sample and must stay verbatim, never a table.
+        String md = "```python\n| A | B | C |\n|---|---|---|\n| 1 | 2 | 3 |\n```";
+        String html = MarkdownRenderer.render(md);
+        assertFalse(html.contains("<table"), "a languaged code fence must not become a table: " + html);
+        assertTrue(html.contains("language-python"), "the language class must be preserved: " + html);
         assertTrue(html.contains("|---|"), "the literal delimiter row must survive inside the code block: " + html);
+    }
+
+    @Test
+    void bareFenceWithNonTableContentIsLeftAsCode() {
+        // Safety: a bare fence whose body is not purely a pipe table (has a non-pipe line) stays a code block.
+        String md = "```\n| A | B |\n|---|---|\nplain code line\n```";
+        String html = MarkdownRenderer.render(md);
+        assertFalse(html.contains("<table"), "a fence with a non-table line must not become a table: " + html);
+        assertTrue(html.contains("plain code line"), "the code body must survive verbatim: " + html);
+        assertTrue(html.contains("|---|"), "the literal delimiter row must survive inside the code block: " + html);
+    }
+
+    @Test
+    void unfencedTableKeepsSourceLineNumbersStable() {
+        // Blanking (not removing) the fence lines must preserve the line count so data-source-line stays
+        // valid: heading on line 1, the fence opens on line 3, so the unwrapped table header is still line 4.
+        String md = "# T\n\n```\n| A | B |\n|---|---|\n| 1 | 2 |\n```";
+        String html = MarkdownRenderer.renderWithSourceLines(md);
+        assertTrue(html.contains("<table"), "the source-line variant must also unwrap the fenced table: " + html);
+        assertTrue(html.contains("data-source-line=\"1\""), "heading still anchors to line 1: " + html);
+        assertTrue(
+                html.contains("data-source-line=\"4\""), "the unwrapped table header still anchors to line 4: " + html);
+        assertFalse(html.contains("<pre>"), "no code block remains: " + html);
     }
 
     @Test

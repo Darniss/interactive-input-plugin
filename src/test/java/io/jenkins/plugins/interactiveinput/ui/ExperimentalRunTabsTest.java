@@ -120,8 +120,10 @@ class ExperimentalRunTabsTest {
         }
 
         // Experimental viewer: native tab present, classic summary suppressed (nothing lands in "Legacy").
-        try (ACLContext ignored = ACL.as2(user("outExp", Map.of(NEW_BUILD_PAGE, "true")).impersonate2())) {
-            assertTrue(hasTab(b, InteractiveOutputRunTab.class), "the native run tab renders in the experimental layout");
+        try (ACLContext ignored =
+                ACL.as2(user("outExp", Map.of(NEW_BUILD_PAGE, "true")).impersonate2())) {
+            assertTrue(
+                    hasTab(b, InteractiveOutputRunTab.class), "the native run tab renders in the experimental layout");
             assertNotNull(tab.getIconFileName(), "the tab is visible in the experimental layout");
             assertFalse(action.isClassicSummaryVisible(), "the classic summary is suppressed (no Legacy duplicate)");
             assertNotNull(action.getIconFileName(), "the action is still reachable via the overflow menu");
@@ -133,10 +135,12 @@ class ExperimentalRunTabsTest {
         assertNotNull(appearance);
         appearance.setOutputBuildCard(false);
         try (ACLContext ignored = ACL.as2(user("outClassicOff", Map.of()).impersonate2())) {
-            assertFalse(action.isClassicSummaryVisible(), "the classic summary is hidden when the Output toggle is off");
+            assertFalse(
+                    action.isClassicSummaryVisible(), "the classic summary is hidden when the Output toggle is off");
             assertNotNull(action.getIconFileName(), "the output action stays reachable when the card is off");
         }
-        try (ACLContext ignored = ACL.as2(user("outExpOff", Map.of(NEW_BUILD_PAGE, "true")).impersonate2())) {
+        try (ACLContext ignored =
+                ACL.as2(user("outExpOff", Map.of(NEW_BUILD_PAGE, "true")).impersonate2())) {
             assertNull(tab.getIconFileName(), "the experimental output card is hidden when the toggle is off");
             assertFalse(hasTab(b, InteractiveOutputRunTab.class), "no output run tab when the toggle is off");
         }
@@ -178,7 +182,8 @@ class ExperimentalRunTabsTest {
         }
 
         // Experimental viewer, waiting: native card visible; classic attention row suppressed.
-        try (ACLContext ignored = ACL.as2(user("inExp", Map.of(NEW_BUILD_PAGE, "true")).impersonate2())) {
+        try (ACLContext ignored =
+                ACL.as2(user("inExp", Map.of(NEW_BUILD_PAGE, "true")).impersonate2())) {
             assertTrue(tab.isWaiting(), "sanity: the build is waiting for input");
             assertNotNull(tab.getIconFileName(), "the input tab is visible in experimental while waiting");
             assertTrue(hasTab(b, InteractiveInputRunTab.class), "the input tab is in getRunTabs while waiting");
@@ -187,7 +192,8 @@ class ExperimentalRunTabsTest {
 
         // Once settled the attention card disappears even in experimental (nothing to answer).
         QuestionStore.get().abort("iq1", "tester", "test");
-        try (ACLContext ignored = ACL.as2(user("inExp2", Map.of(NEW_BUILD_PAGE, "true")).impersonate2())) {
+        try (ACLContext ignored =
+                ACL.as2(user("inExp2", Map.of(NEW_BUILD_PAGE, "true")).impersonate2())) {
             assertFalse(tab.isWaiting(), "no longer waiting after settle");
             assertNull(tab.getIconFileName(), "the input tab is hidden once the question is settled");
         }
@@ -235,7 +241,8 @@ class ExperimentalRunTabsTest {
         }
 
         // Experimental viewer: native card visible, listing the build's readable reviews.
-        try (ACLContext ignored = ACL.as2(user("viewExp", Map.of(NEW_BUILD_PAGE, "true")).impersonate2())) {
+        try (ACLContext ignored =
+                ACL.as2(user("viewExp", Map.of(NEW_BUILD_PAGE, "true")).impersonate2())) {
             assertNotNull(tab.getIconFileName(), "the view tab is visible in the experimental layout");
             assertTrue(hasTab(b, InteractiveViewRunTab.class), "the view tab is in getRunTabs in experimental");
             assertFalse(tab.getReviews().isEmpty(), "the card lists the build's readable reviews");
@@ -246,7 +253,8 @@ class ExperimentalRunTabsTest {
         InteractiveInputAppearanceConfig appearance = InteractiveInputAppearanceConfig.get();
         assertNotNull(appearance);
         appearance.setViewBuildCard(false);
-        try (ACLContext ignored = ACL.as2(user("viewExpOff", Map.of(NEW_BUILD_PAGE, "true")).impersonate2())) {
+        try (ACLContext ignored =
+                ACL.as2(user("viewExpOff", Map.of(NEW_BUILD_PAGE, "true")).impersonate2())) {
             assertNull(tab.getIconFileName(), "the view card is hidden when the Appearance toggle is off");
             assertFalse(hasTab(b, InteractiveViewRunTab.class), "no view run tab when the Appearance toggle is off");
         }
@@ -299,8 +307,10 @@ class ExperimentalRunTabsTest {
                     "in the classic layout the box tracks the Appearance toggle");
         }
         // Experimental viewer: the inline box is suppressed so nothing of ours renders inside "Legacy".
-        try (ACLContext ignored = ACL.as2(user("jobExp", Map.of(NEW_JOB_PAGE, "true")).impersonate2())) {
-            assertFalse(action.isJobBoxVisibleClassic(), "the inline box is suppressed under the experimental job page");
+        try (ACLContext ignored =
+                ACL.as2(user("jobExp", Map.of(NEW_JOB_PAGE, "true")).impersonate2())) {
+            assertFalse(
+                    action.isJobBoxVisibleClassic(), "the inline box is suppressed under the experimental job page");
         }
     }
 }

@@ -137,8 +137,7 @@ class InteractiveViewStepTest {
         }
         // The per-file title is its workspace-relative path, so the listing can show the folder layout.
         assertTrue(docs.stream().anyMatch(d -> "reports/a.md".equals(d.getTitle())), "a.md title is its rel path");
-        assertTrue(
-                docs.stream().anyMatch(d -> "reports/sub/b.md".equals(d.getTitle())), "b.md title is its rel path");
+        assertTrue(docs.stream().anyMatch(d -> "reports/sub/b.md".equals(d.getTitle())), "b.md title is its rel path");
     }
 
     @Test

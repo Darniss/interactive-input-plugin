@@ -181,20 +181,15 @@ public class InteractiveViewStepExecution extends AbstractStepExecutionImpl {
         }
         Collections.sort(rels); // stable, path-sorted order for a predictable listing
         if (rels.size() > MAX_FILES) {
-            throw new AbortException("interactiveView: too many files matched (" + rels.size() + ", max "
-                    + MAX_FILES + "); narrow the includes/dir pattern");
+            throw new AbortException("interactiveView: too many files matched (" + rels.size() + ", max " + MAX_FILES
+                    + "); narrow the includes/dir pattern");
         }
         return rels;
     }
 
     /** Build + submit one review document for a single matched file; returns the stored document. */
     private ReviewDocument publishOne(
-            Run<?, ?> run,
-            String relPath,
-            String content,
-            String groupId,
-            String groupReportName,
-            boolean infoMode) {
+            Run<?, ?> run, String relPath, String content, String groupId, String groupReportName, boolean infoMode) {
         String reportName;
         String title;
         if (groupReportName != null) {
@@ -292,7 +287,10 @@ public class InteractiveViewStepExecution extends AbstractStepExecutionImpl {
             sb.append(sb.length() > 0 ? ", " : "").append("dir='").append(dir).append("'");
         }
         if (includes != null) {
-            sb.append(sb.length() > 0 ? ", " : "").append("includes='").append(includes).append("'");
+            sb.append(sb.length() > 0 ? ", " : "")
+                    .append("includes='")
+                    .append(includes)
+                    .append("'");
         }
         return sb.length() > 0 ? sb.toString() : "(no source)";
     }

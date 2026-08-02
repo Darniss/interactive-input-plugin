@@ -19,6 +19,10 @@ import net.sf.json.JSONObject;
  * comment. The {@link #getAuthor() author} always remains the true, server-set Jenkins/token identity for
  * audit and is never client-supplied.
  *
+ * <p>A comment left by highlighting text may also carry a display-only {@linkplain #getQuote() quote} — the
+ * verbatim snippet that was highlighted — so the viewer can show back exactly what the reviewer selected,
+ * even when it is a sub-phrase of a line or spans several lines. Anchoring still uses {@link #getLine()}.
+ *
  * <p>Persisted via XStream as part of the owning {@link ReviewDocument}. All transitions on the
  * comment (only {@link #setResolved(boolean)}) are performed by {@code ViewStore} while it holds the
  * owning document's monitor.
@@ -59,11 +63,36 @@ public class ReviewComment implements Serializable {
     @CheckForNull
     private final String authorLabel;
 
+    /**
+     * Optional verbatim snippet of the exact text the reviewer highlighted when leaving this comment (see the
+     * viewer's highlight-select flow). The comment still <em>anchors</em> at {@link #getLine()}; this field
+     * only records <em>what</em> was highlighted — which may be a sub-phrase of a long line or span several
+     * lines — so the viewer can show it back verbatim. It is display-only, rendered by the client via
+     * {@code textContent} (never markdown/HTML), and length-bounded at the REST layer. {@code null} for the
+     * "+"/general path and legacy data. XStream-safe: absent in {@code views.xml} that predates it, so it
+     * deserialises to {@code null}.
+     */
+    @CheckForNull
+    private final String quote;
+
     private boolean resolved;
 
     /** Back-compat constructor: a root comment shown under its real author (no reply, no display label). */
     public ReviewComment(@NonNull String id, int line, @NonNull String body, @NonNull String author, long createdTs) {
         this(id, line, body, author, createdTs, null, null);
+    }
+
+    /** Back-compat constructor: a comment with threading/label but no highlighted-selection quote. */
+    @SuppressWarnings("checkstyle:ParameterNumber")
+    public ReviewComment(
+            @NonNull String id,
+            int line,
+            @NonNull String body,
+            @NonNull String author,
+            long createdTs,
+            @CheckForNull String parentId,
+            @CheckForNull String authorLabel) {
+        this(id, line, body, author, createdTs, parentId, authorLabel, null);
     }
 
     @SuppressWarnings("checkstyle:ParameterNumber")
@@ -74,7 +103,8 @@ public class ReviewComment implements Serializable {
             @NonNull String author,
             long createdTs,
             @CheckForNull String parentId,
-            @CheckForNull String authorLabel) {
+            @CheckForNull String authorLabel,
+            @CheckForNull String quote) {
         this.id = id;
         this.line = line;
         this.body = body;
@@ -82,6 +112,7 @@ public class ReviewComment implements Serializable {
         this.createdTs = createdTs;
         this.parentId = parentId;
         this.authorLabel = authorLabel;
+        this.quote = quote;
     }
 
     @NonNull
@@ -133,6 +164,16 @@ public class ReviewComment implements Serializable {
         return authorLabel;
     }
 
+    /**
+     * @return the verbatim text the reviewer highlighted when leaving this comment (a sub-phrase or a
+     *     multi-line span), or {@code null} when the comment was left via the "+" affordance / as a general
+     *     note, or for legacy data. Display-only; the comment still anchors at {@link #getLine()}.
+     */
+    @CheckForNull
+    public String getQuote() {
+        return quote;
+    }
+
     public boolean isResolved() {
         return resolved;
     }
@@ -162,6 +203,9 @@ public class ReviewComment implements Serializable {
         }
         if (authorLabel != null) {
             o.put("authorLabel", authorLabel);
+        }
+        if (quote != null) {
+            o.put("quote", quote);
         }
         return o;
     }

@@ -91,7 +91,7 @@ public final class MarkdownRenderer {
         if (markdown == null || markdown.isEmpty()) {
             return "";
         }
-        return RENDERER.render(PARSER.parse(normalizeGfmTables(markdown)));
+        return RENDERER.render(PARSER.parse(normalizeGfmTables(unfenceGfmTables(markdown))));
     }
 
     /**
@@ -111,7 +111,7 @@ public final class MarkdownRenderer {
         if (markdown == null || markdown.isEmpty()) {
             return "";
         }
-        return RENDERER_WITH_SPANS.render(PARSER_WITH_SPANS.parse(normalizeGfmTables(markdown)));
+        return RENDERER_WITH_SPANS.render(PARSER_WITH_SPANS.parse(normalizeGfmTables(unfenceGfmTables(markdown))));
     }
 
     // ---- GFM table delimiter repair (Interactive View "table not rendered" fix) ----
@@ -201,6 +201,111 @@ public final class MarkdownRenderer {
             i++;
         }
         return changed ? String.join("\n", lines) : markdown;
+    }
+
+    // ---- GFM table un-fencing (render a pipe table a generator wrapped in a bare ``` fence) ----
+
+    /**
+     * Unwraps a fenced code block whose info string is empty and whose body is <em>exactly</em> a GFM pipe
+     * table, so the table renders as a real {@code <table>} instead of literal "|"-delimited code.
+     *
+     * <p>Some report generators wrap a table in a bare ```` ``` ```` (or {@code ~~~}) fence; commonmark then
+     * (correctly per the spec) renders it verbatim as {@code <pre><code>}, which the reviewer sees as raw
+     * pipe text — the reported Interactive View "table inside a bullet is not rendered" case. This pass is
+     * deliberately conservative:
+     *
+     * <ul>
+     *   <li>Only a fence with <em>no</em> info string is considered — {@code ```python} (or any language)
+     *       is always left as code, so intentional code samples are untouched.</li>
+     *   <li>The fenced body must be a table and nothing else: a pipe-containing header line, a delimiter row
+     *       directly under it ({@link #isDelimiterRow(String)}), and every other non-blank body line
+     *       containing a {@code |}. A fence holding prose or non-table code is left verbatim.</li>
+     *   <li>It only <em>blanks</em> the opening and closing fence lines (it never adds or removes lines), so
+     *       the total line count — and therefore the {@code data-source-line} anchors used by
+     *       {@link #renderWithSourceLines(String)} — is unchanged.</li>
+     * </ul>
+     *
+     * <p>Runs before {@link #normalizeGfmTables(String)}, which then repairs any delimiter-width mismatch in
+     * the now-unwrapped table. No HTML is produced here — the table is still parsed and escaped by
+     * commonmark, so escaping / URL sanitisation are entirely unaffected.
+     *
+     * @param markdown raw markdown (non-null)
+     * @return the markdown with any bare-fenced pipe tables unwrapped so they render as tables
+     */
+    @NonNull
+    static String unfenceGfmTables(@NonNull String markdown) {
+        if (markdown.indexOf('|') < 0) {
+            return markdown; // no pipe anywhere -> no table to unwrap (fast path)
+        }
+        String[] lines = markdown.split("\n", -1);
+        boolean changed = false;
+        int i = 0;
+        while (i < lines.length) {
+            String stripped = lines[i].strip();
+            int run = fenceRun(stripped);
+            if (run < 3) {
+                i++;
+                continue;
+            }
+            char fenceChar = stripped.charAt(0);
+            boolean hasInfoString = !stripped.substring(run).isBlank();
+            int close = findFenceClose(lines, i + 1, fenceChar, run);
+            if (close < 0) {
+                break; // unterminated fence: leave the remainder verbatim (never misfire)
+            }
+            if (!hasInfoString && isFencedTableBody(lines, i + 1, close)) {
+                lines[i] = "";
+                lines[close] = "";
+                changed = true;
+            }
+            i = close + 1; // never scan inside a fenced block
+        }
+        return changed ? String.join("\n", lines) : markdown;
+    }
+
+    /**
+     * @return the index of the first line in {@code [from, len)} that closes a fence opened with
+     *     {@code openRun} {@code fenceChar}s (a run &ge; the opener, of the same char, with nothing else on
+     *     the line), or {@code -1} if the fence is never closed.
+     */
+    private static int findFenceClose(@NonNull String[] lines, int from, char fenceChar, int openRun) {
+        for (int j = from; j < lines.length; j++) {
+            String s = lines[j].strip();
+            int r = fenceRun(s);
+            if (r >= openRun && s.charAt(0) == fenceChar && s.substring(r).isBlank()) {
+                return j;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * @return {@code true} if the body lines {@code [from, toExclusive)} are exactly a GFM pipe table: a
+     *     pipe-containing header line, a delimiter row directly under it, and every other non-blank line
+     *     containing a {@code |}. Blank lines around the table are tolerated; a single non-pipe line makes it
+     *     not a pure table (left as code).
+     */
+    private static boolean isFencedTableBody(@NonNull String[] lines, int from, int toExclusive) {
+        List<Integer> nonBlank = new ArrayList<>();
+        for (int k = from; k < toExclusive; k++) {
+            if (!lines[k].strip().isEmpty()) {
+                nonBlank.add(k);
+            }
+        }
+        if (nonBlank.size() < 2) {
+            return false; // need at least a header and a delimiter row
+        }
+        String header = lines[nonBlank.get(0)].strip();
+        String delim = lines[nonBlank.get(1)].strip();
+        if (header.indexOf('|') < 0 || delim.indexOf('|') < 0 || !isDelimiterRow(delim)) {
+            return false;
+        }
+        for (int k : nonBlank) {
+            if (lines[k].indexOf('|') < 0) {
+                return false; // a non-pipe line means this fence is not purely a table
+            }
+        }
+        return true;
     }
 
     /** @return the length of a leading run of {@code `} or {@code ~} fence characters (&ge;3), else 0. */

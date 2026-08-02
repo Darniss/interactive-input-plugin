@@ -7,6 +7,36 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Interactive View file & folder downloads.** The review editor can now download the file being viewed
+  and — for a multi-file group (a glob/`dir` publish) — every file in the group as a single ZIP. Two new
+  read-only REST endpoints back it: `GET /views/{id}/download` (the current version's content as an
+  attachment) and `GET /views/{id}/downloadGroup` (a ZIP of every readable co-group member on that build).
+  The UI adds a `Download` button in the detail toolbar, a per-card `Download` on the build's review list,
+  and a `Download all (.zip)` on each multi-file group header. Both endpoints enforce `Item.READ` via
+  `ViewStore.canView` (404 no-leak, never 403) and stream through a new `DownloadHttpResponse` that sets
+  `Content-Disposition: attachment` (ASCII `filename` **and** RFC 5987 `filename*`, so a stray quote/CR/LF
+  in a name can never break the header) plus `X-Content-Type-Options: nosniff`. ZIP entry names are
+  sanitised (no CR/LF, no leading `/`, no `.`/`..` segments) and de-duplicated. Sizes stay bounded by the
+  step's existing 2 MB/file and 8 MB/group snapshot caps, so the archive is built safely in memory.
+- **Highlight-to-comment mode for inline review comments (now the default).** Inline comments can be added
+  two ways, chosen by a per-user toolbar toggle persisted in `localStorage` (`ii-view-comment-mode`):
+  **Highlight** (default) — select any text in a line and click a floating *Add comment* button — and
+  **Plus** — the original hover-`+` affordance (identical to before when selected). Highlight mode resolves
+  the selection's exact source line (a Source row, or the innermost `data-source-line` element in the
+  rendered view) and opens that line's thread, reusing the same per-line comment model and REST so a
+  comment round-trips to the pipeline unchanged. The `+` affordances are hidden via CSS in highlight mode
+  while the existing comment-count markers stay visible. Whatever the reviewer highlights is now preserved:
+  the exact selected text — a sub-phrase of a long line, or a span across several lines — is captured as an
+  optional, display-only `quote` on the comment (new `ReviewComment` field; length-bounded server-side and
+  rendered verbatim via `textContent`, never markdown/HTML) and shown back above both the composer and the
+  posted comment, while the comment still anchors at the selection's **first** line (so a multi-line drag no
+  longer collapses to a single line, and a partial selection no longer silently expands to the whole line).
+  A comment left via the Plus/`+` path, a general comment, and legacy data carry no quote (XStream-safe null).
+- **Line-context snippets in inline comments.** The selected-line thread header, the comment composer
+  placeholder, each comment's `L{n}` chip tooltip and the line-comment navigation list now show a short,
+  whitespace-collapsed, length-bounded snippet of the referenced source line (always via `textContent`,
+  never `innerHTML`), so a reviewer sees *what* a line says — not just its number — when reading or writing
+  a comment.
 - **Per-project notification centre** — notifications now surface per pipeline/build instead of only
   at one Jenkins-wide point:
   - `InteractiveInputJobAction` (`TransientActionFactory<Job>`) — an inline box on the job/pipeline
@@ -245,6 +275,25 @@ All notable changes to this project are documented here. The format follows
   longer stays stale until a full page reload.
 
 ### Fixed
+- **Interactive View now renders a pipe table that a generator wrapped in a bare code fence.** Observed
+  failure (live doc `a2571a80…`): a GFM table nested inside a bullet was emitted inside an **un-languaged**
+  fenced code block, so commonmark — correctly per spec — rendered it verbatim as a `<pre><code>`
+  `|`-delimited block instead of a `<table>` (the document had 3 `<pre>` and only 1 `<table>`). Root cause:
+  a fenced code block with no info string is code, not a table, by definition. Fix: `MarkdownRenderer`
+  gains a conservative `unfenceGfmTables` pass (run before `normalizeGfmTables` in both the plain and
+  source-line renders) that unwraps a fenced block **only** when it has no info string **and** its entire
+  body is a pipe table (a header line, a delimiter row directly beneath it, and every other non-blank line
+  containing a `|`), by blanking just the opening/closing fence lines so the total line count — and the
+  `data-source-line` anchors — stay stable. A fence with a language tag (e.g. `python`) or any non-table
+  content is left untouched, and commonmark still escapes every cell. Also confirmed to render a table
+  nested inside a list item.
+- **The inline-comment "+" no longer hides behind a list bullet.** Observed failure (screenshot from the
+  reporter): on a rendered markdown list the per-line `+`/comment-count affordance, positioned in the
+  left gutter at `-24px`, sat on top of the list bullet and was hard to find. Root cause: a list item is
+  itself a comment-anchor host, so its affordance shared the negative-left zone the browser already uses
+  for the bullet marker. Fix (`viewer.css`, presentation only): rendered lists get a deterministic indent
+  and the list-item affordance is pushed further left, clear of the bullet; the affordance on every other
+  block (paragraph, heading, table row) is unchanged, and no behaviour or markup changes.
 - **Interactive View now renders GitHub-Flavored Markdown — tables, strikethrough and autolinks.**
   Observed failure: a markdown review containing a pipe table rendered as a literal `|`-delimited
   paragraph in the document viewer (and likewise in the `askInteractive` modal context panel), rather

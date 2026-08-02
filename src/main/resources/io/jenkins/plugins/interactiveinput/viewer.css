@@ -335,6 +335,49 @@
   font-size: 0.68rem;
 }
 
+/* #3: a list item is itself an anchor host, so its gutter "+"/count marker sat on top of the list bullet
+   (reported as "the + goes behind the bullet — hard to find"). Give lists a deterministic indent and push
+   the list-item affordance clear to the LEFT of the bullet, roughly aligning it with the gutter used by the
+   other blocks. Non-list hosts (paragraph, heading, table row) keep the default -24px offset above. */
+.iv-rendered ul,
+.iv-rendered ol {
+  padding-left: 2em;
+}
+
+.iv-rendered li.iv-anchor-host > .iv-rblock-add,
+.iv-rendered li.iv-anchor-host > .iv-rblock-marker {
+  left: -3.4em;
+}
+
+/* #4 highlight mode: hide the "+" add affordances in BOTH views (the existing comment-count markers stay,
+   so threads remain discoverable). Plus mode simply lacks the .iv-mode-highlight class, restoring them. */
+.iv-mode-highlight .iv-line-add,
+.iv-mode-highlight .iv-rblock-add {
+  display: none;
+}
+
+/* The floating "Add comment" button shown at a text selection in highlight mode. position:fixed, placed
+   from the selection's viewport rect in JS. */
+.iv-float-add {
+  position: fixed;
+  z-index: 1000;
+  display: none;
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border: 1px solid var(--accent-color, #4a90d9);
+  border-radius: 6px;
+  background: var(--accent-color, #4a90d9);
+  color: var(--text-color--on-accent, #fff);
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.28);
+}
+
+.iv-float-add:hover {
+  filter: brightness(1.05);
+}
+
 /* ---- source with line gutter ---- */
 .iv-code,
 .iv-code-block {
@@ -534,6 +577,20 @@
   margin-bottom: 0;
 }
 
+/* The verbatim text a comment was highlighted on (highlight-select). Quoted context shown above the comment
+   body; rendered via textContent, so it appears exactly as highlighted (a sub-phrase or a multi-line span). */
+.iv-comment-quote {
+  margin: 2px 0 6px;
+  padding: 4px 10px;
+  border-left: 3px solid var(--accent-color, #4a90d9);
+  border-radius: 0 6px 6px 0;
+  background: var(--item-background--hover, rgba(128, 128, 128, 0.06));
+  color: var(--text-color-secondary, #6a6a6a);
+  font-size: 0.82rem;
+  font-style: italic;
+  overflow-wrap: anywhere;
+}
+
 .iv-comment-foot {
   margin-top: 6px;
 }
@@ -571,6 +628,34 @@
   font-size: 0.82rem;
 }
 
+/* Preview of the highlighted selection a pending comment will be attached to (highlight mode). Mirrors the
+   posted comment's quote block so the reviewer sees exactly what will be captured before submitting. */
+.iv-composer-quote {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 6px;
+  padding: 6px 10px;
+  border-left: 3px solid var(--accent-color, #4a90d9);
+  border-radius: 0 6px 6px 0;
+  background: var(--item-background--hover, rgba(128, 128, 128, 0.06));
+}
+
+.iv-quote-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-color-secondary, #6a6a6a);
+}
+
+.iv-quote-text {
+  font-size: 0.85rem;
+  font-style: italic;
+  color: var(--text-color, #2b2b2b);
+  overflow-wrap: anywhere;
+}
+
 /* ---- list mode ---- */
 .iv-list {
   display: flex;
@@ -590,6 +675,44 @@
 
 .iv-list-card:hover {
   background: var(--item-background--hover, rgba(128, 128, 128, 0.08));
+}
+
+/* ---- downloads (item #1): per-file + whole-group zip ---- */
+a.iv-download {
+  text-decoration: none; /* it is a jenkins-button rendered as an <a> */
+}
+
+/* The per-card download is a SIBLING of the card <a> (an <a> cannot nest in an <a>), floated over the
+   card's top-right so it does not disturb the card's own layout. */
+.iv-list-card-wrap {
+  position: relative;
+}
+
+.iv-list-download {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  padding: 2px 10px;
+  font-size: 0.76rem;
+  border: 1px solid var(--input-border, rgba(128, 128, 128, 0.35));
+  border-radius: 999px;
+  background: var(--card-background, var(--background, #fff));
+  color: var(--link-color, var(--accent-color, #4a90d9));
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.iv-group-download {
+  margin-left: auto; /* push to the far (right) end of the flex group head */
+  font-size: 0.78rem;
+  color: var(--link-color, var(--accent-color, #4a90d9));
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.iv-list-download:hover,
+.iv-group-download:hover {
+  text-decoration: underline;
 }
 
 .iv-list-title {
@@ -765,6 +888,35 @@
 .iv-line-nav-item:hover {
   background: var(--item-background--hover, rgba(128, 128, 128, 0.08));
   border-radius: 6px;
+}
+
+/* #5: line-context snippet in the selected-line thread head and the line-comment navigation list. */
+.iv-line-snippet {
+  font-weight: 400;
+  font-size: 0.85em;
+  color: var(--text-color-secondary, #6a6a6a);
+}
+
+.iv-line-nav-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-color-secondary, #6a6a6a);
+  font-family: var(--font-family-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 0.78rem;
+}
+
+.iv-line-nav-count {
+  flex: 0 0 auto;
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--item-background--hover, rgba(128, 128, 128, 0.15));
+  font-size: 0.72rem;
+  line-height: 1.5;
+  text-align: center;
 }
 
 /* ---- flash ---- */

@@ -52,7 +52,8 @@ public class MetricReport implements Serializable {
         this(name, metrics, createdTs, null);
     }
 
-    public MetricReport(@NonNull String name, @NonNull List<Metric> metrics, long createdTs, @CheckForNull String chartType) {
+    public MetricReport(
+            @NonNull String name, @NonNull List<Metric> metrics, long createdTs, @CheckForNull String chartType) {
         this.name = name;
         this.metrics = new ArrayList<>(metrics);
         this.createdTs = createdTs;

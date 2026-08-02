@@ -106,8 +106,7 @@ class InteractiveOutputStepTest {
         assertEquals(MetricReport.CHART_LINE, new MetricReport("R", List.of(), 0L, "wat").getChartType());
         assertEquals(MetricReport.CHART_BAR, new MetricReport("R", List.of(), 0L, "bar").getChartType());
         assertEquals(MetricReport.CHART_PIE, new MetricReport("R", List.of(), 0L, "PIE").getChartType());
-        assertEquals(
-                MetricReport.CHART_TIMESERIES, new MetricReport("R", List.of(), 0L, "TimeSeries").getChartType());
+        assertEquals(MetricReport.CHART_TIMESERIES, new MetricReport("R", List.of(), 0L, "TimeSeries").getChartType());
     }
 
     @Test

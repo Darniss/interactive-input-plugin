@@ -10,9 +10,10 @@ import net.sf.json.JSONObject;
 import org.junit.jupiter.api.Test;
 
 /**
- * Model tests for {@link ReviewComment}: the threading ({@code parentId}) and display-label
- * ({@code authorLabel}) fields must default to {@code null}, must not disturb the real audit author, and
- * must load back-compatibly from legacy {@code views.xml} that predates them (§ XStream-safe defaults).
+ * Model tests for {@link ReviewComment}: the threading ({@code parentId}), display-label
+ * ({@code authorLabel}) and highlighted-selection ({@code quote}) fields must default to {@code null}, must
+ * not disturb the real audit author, and must load back-compatibly from legacy {@code views.xml} that
+ * predates them (§ XStream-safe defaults).
  */
 class ReviewCommentTest {
 
@@ -56,6 +57,38 @@ class ReviewCommentTest {
         assertEquals("c1", loaded.getParentId());
         assertEquals("AI response", loaded.getAuthorLabel());
         assertEquals("svc-jenkins", loaded.getAuthor());
+    }
+
+    @Test
+    void highlightQuoteRoundTripsThroughJsonAndXstreamButIsOmittedWhenAbsent() {
+        // A comment left via the "+" affordance has no highlighted quote: getQuote() is null and JSON omits it.
+        ReviewComment plain = new ReviewComment("c1", 5, "hello", "alice", 1000L);
+        assertNull(plain.getQuote(), "a non-highlight comment has no quote");
+        assertFalse(plain.toJson().has("quote"), "a comment without a quote omits it from JSON: " + plain.toJson());
+
+        // A comment left by highlighting text carries the verbatim snippet (a sub-phrase of a long line here).
+        String snippet = "Use Case 2 (Processing Client Certificate) documents updated TLS session matching";
+        ReviewComment quoted = new ReviewComment("c2", 5, "why 1..255?", "builder", 2000L, null, null, snippet);
+        assertEquals(snippet, quoted.getQuote());
+        assertEquals(snippet, quoted.toJson().getString("quote"));
+        // The quote never disturbs the real audit author or the anchor line.
+        assertEquals("builder", quoted.getAuthor());
+        assertEquals(5, quoted.getLine());
+
+        XStream2 xs = newXStream();
+        ReviewComment loaded = (ReviewComment) xs.fromXML(xs.toXML(quoted));
+        assertEquals(snippet, loaded.getQuote(), "the highlighted quote survives an XStream round-trip");
+    }
+
+    @Test
+    void legacyXmlWithoutQuoteLoadsWithNullQuote() {
+        // A comment persisted before the highlight quote existed: no <quote> element -> null (back-compat).
+        String legacy = "<io.jenkins.plugins.interactiveinput.view.ReviewComment>"
+                + "<id>c1</id><line>5</line><body>hello</body><author>alice</author>"
+                + "<createdTs>1000</createdTs><resolved>false</resolved>"
+                + "</io.jenkins.plugins.interactiveinput.view.ReviewComment>";
+        ReviewComment c = (ReviewComment) newXStream().fromXML(legacy);
+        assertNull(c.getQuote(), "legacy comment has no quote");
     }
 
     @Test

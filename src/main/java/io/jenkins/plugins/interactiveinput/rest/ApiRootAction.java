@@ -29,14 +29,21 @@ import io.jenkins.plugins.interactiveinput.view.ReviewDocument;
 import io.jenkins.plugins.interactiveinput.view.ReviewStatus;
 import io.jenkins.plugins.interactiveinput.view.ViewStore;
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 import jenkins.model.Jenkins;
 import jenkins.security.stapler.StaplerAccessibleType;
 import net.sf.json.JSONArray;
@@ -65,6 +72,8 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
  *   GET  /interactive-input/api/v1/views                   -&gt; Views#doIndex             (Overall/Read; ?all=true =&gt; Administer)
  *   GET  /interactive-input/api/v1/views/{id}              -&gt; ViewEndpoint#doIndex      (Item.READ, else 404)
  *   GET  /interactive-input/api/v1/views/{id}/raw          -&gt; ViewEndpoint#doRaw        (Item.READ, else 404)
+ *   GET  /interactive-input/api/v1/views/{id}/download     -&gt; ViewEndpoint#doDownload   (Item.READ, else 404)
+ *   GET  /interactive-input/api/v1/views/{id}/downloadGroup -&gt; ViewEndpoint#doDownloadGroup (Item.READ, else 404)
  *   POST /interactive-input/api/v1/views/{id}/comments     -&gt; ViewEndpoint#doComments   (Item.BUILD/submitter, else 403)
  *   POST /interactive-input/api/v1/views/{id}/edit         -&gt; ViewEndpoint#doEdit       (Item.BUILD/submitter, else 403)
  *   POST /interactive-input/api/v1/views/{id}/decision     -&gt; ViewEndpoint#doDecision   (Item.BUILD/submitter, else 403)
@@ -606,6 +615,173 @@ public class ApiRootAction implements UnprotectedRootAction {
         }
 
         /**
+         * GET /views/{id}/download — the current version's content as a file attachment.
+         *
+         * <p>Read-only (no CSRF needed) and permission-checked exactly like {@link #doIndex()}:
+         * {@code Item.READ} via {@link ViewStore#canView}, else 404 (no existence leak). The download name
+         * is the snapshot's basename, further sanitised by {@link DownloadHttpResponse}.
+         */
+        public HttpResponse doDownload() {
+            HttpResponse disabled = viewsDisabledOrNull();
+            if (disabled != null) {
+                return disabled;
+            }
+            ViewStore store = ViewStore.get();
+            ReviewDocument doc = store.get(id);
+            if (doc == null || !store.canView(doc)) {
+                return JsonHttpResponse.error(404, "No such review: " + id);
+            }
+            String content = store.readCurrentContent(id);
+            if (content == null) {
+                return JsonHttpResponse.error(404, "No content for review: " + id);
+            }
+            byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
+            return new DownloadHttpResponse("application/octet-stream", downloadBaseName(doc), bytes);
+        }
+
+        /**
+         * GET /views/{id}/downloadGroup — every readable document published together with this one (same
+         * {@code groupId} on the same build) as a single ZIP; a lone document yields a one-entry archive.
+         *
+         * <p>Read-only and permission-checked like {@link #doDownload()}: the anchor document must be
+         * readable ({@code Item.READ}, else 404), and only co-group members the caller can also read are
+         * included ({@link ViewStore#listForBuild} already applies {@code canView}). ZIP entry names are
+         * sanitised (no CR/LF, no leading {@code /}, no {@code .}/{@code ..} segments) and de-duplicated.
+         */
+        public HttpResponse doDownloadGroup() {
+            HttpResponse disabled = viewsDisabledOrNull();
+            if (disabled != null) {
+                return disabled;
+            }
+            ViewStore store = ViewStore.get();
+            ReviewDocument doc = store.get(id);
+            if (doc == null || !store.canView(doc)) {
+                return JsonHttpResponse.error(404, "No such review: " + id);
+            }
+            String group = doc.getGroupId();
+            List<ReviewDocument> members = new ArrayList<>();
+            for (ReviewDocument d : store.listForBuild(doc.getJobFullName(), doc.getBuildNumber())) {
+                if (group.equals(d.getGroupId())) {
+                    members.add(d);
+                }
+            }
+            byte[] zip;
+            try {
+                zip = zipMembers(store, members);
+            } catch (IOException e) {
+                LOGGER.log(Level.WARNING, e, () -> "failed to build download archive for group " + group);
+                return JsonHttpResponse.error(500, "Failed to build download archive");
+            }
+            if (zip == null) {
+                return JsonHttpResponse.error(404, "No downloadable content for review: " + id);
+            }
+            return new DownloadHttpResponse("application/zip", zipDownloadName(doc), zip);
+        }
+
+        /**
+         * ZIPs the current content of each member into an in-memory archive, or returns {@code null} if no
+         * member had readable content. A member whose bytes are missing is skipped (not fatal).
+         */
+        @CheckForNull
+        private static byte[] zipMembers(@NonNull ViewStore store, @NonNull List<ReviewDocument> members)
+                throws IOException {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            Set<String> used = new HashSet<>();
+            int entries = 0;
+            try (ZipOutputStream zos = new ZipOutputStream(baos, StandardCharsets.UTF_8)) {
+                for (ReviewDocument d : members) {
+                    String content = store.readCurrentContent(d.getId());
+                    if (content == null) {
+                        continue;
+                    }
+                    ZipEntry entry = new ZipEntry(uniqueEntryName(used, safeEntryName(d.getFileName(), d.getId())));
+                    entry.setTime(d.getCreatedTs());
+                    zos.putNextEntry(entry);
+                    zos.write(content.getBytes(StandardCharsets.UTF_8));
+                    zos.closeEntry();
+                    entries++;
+                }
+            }
+            return entries == 0 ? null : baos.toByteArray();
+        }
+
+        /** The single-file download name: the snapshot's basename, sanitised, with a safe fallback. */
+        @NonNull
+        private static String downloadBaseName(@NonNull ReviewDocument doc) {
+            String base = stripDownloadName(baseName(doc.getFileName()));
+            if (!base.isEmpty()) {
+                return base;
+            }
+            String fallback = stripDownloadName(doc.getReportName());
+            return fallback.isEmpty() ? "download.txt" : fallback;
+        }
+
+        /** The group ZIP download name: {@code <reportName>.zip} (sanitised, with a safe fallback). */
+        @NonNull
+        private static String zipDownloadName(@NonNull ReviewDocument doc) {
+            String base = stripDownloadName(doc.getReportName());
+            if (base.isEmpty()) {
+                base = "reviews";
+            }
+            return base.endsWith(".zip") ? base : base + ".zip";
+        }
+
+        /** Strip control chars, path separators and quotes from a suggested download name. */
+        @NonNull
+        private static String stripDownloadName(@NonNull String raw) {
+            return raw.replaceAll("[\\p{Cntrl}/\\\\\"]", "").trim();
+        }
+
+        /** @return the last path segment of {@code path} (handles both {@code /} and {@code \\}). */
+        @NonNull
+        private static String baseName(@NonNull String path) {
+            String p = path.replace('\\', '/');
+            int slash = p.lastIndexOf('/');
+            return slash >= 0 ? p.substring(slash + 1) : p;
+        }
+
+        /**
+         * A ZIP entry name derived from the file path: control chars removed and any leading {@code /},
+         * {@code .} or {@code ..} segments dropped (so the archive can never write outside its root when a
+         * recipient extracts it). Falls back to {@code file-<id>} if nothing usable remains.
+         */
+        @NonNull
+        private static String safeEntryName(@NonNull String fileName, @NonNull String fallbackId) {
+            String cleaned = fileName.replace('\\', '/').replaceAll("\\p{Cntrl}", "");
+            StringBuilder sb = new StringBuilder();
+            for (String seg : cleaned.split("/")) {
+                String s = seg.trim();
+                if (s.isEmpty() || ".".equals(s) || "..".equals(s)) {
+                    continue;
+                }
+                if (sb.length() > 0) {
+                    sb.append('/');
+                }
+                sb.append(s);
+            }
+            String name = sb.toString();
+            return name.isEmpty() ? "file-" + fallbackId : name;
+        }
+
+        /** @return {@code desired} if unused, else {@code stem-2.ext}, {@code stem-3.ext}, … (ZIP forbids dupes). */
+        @NonNull
+        private static String uniqueEntryName(@NonNull Set<String> used, @NonNull String desired) {
+            if (used.add(desired)) {
+                return desired;
+            }
+            int dot = desired.lastIndexOf('.');
+            String stem = dot > 0 ? desired.substring(0, dot) : desired;
+            String ext = dot > 0 ? desired.substring(dot) : "";
+            for (int n = 2; n < 10_000; n++) {
+                String candidate = stem + "-" + n + ext;
+                if (used.add(candidate)) {
+                    return candidate;
+                }
+            }
+            return stem + "-" + java.util.UUID.randomUUID() + ext;
+        }
+
+        /**
          * POST /views/{id}/comments — add an inline or general comment, optionally as a threaded reply
          * ({@code parentId}) and/or with a display-only author label ({@code authorLabel}, or set
          * {@code automated:true} to use the configured global label). The audit author is always the
@@ -645,8 +821,13 @@ public class ApiRootAction implements UnprotectedRootAction {
             if (authorLabel == null && body.optBoolean("automated", false)) {
                 authorLabel = boundLabel(InteractiveInputGlobalConfig.automationReplyNameOrDefault());
             }
+            // Optional verbatim snippet of the exact text the reviewer highlighted (viewer highlight-select
+            // flow). Display-only context shown back via textContent; length-bounded here. Only meaningful for
+            // a line-anchored comment, so it is dropped for a general note. Newlines in a multi-line selection
+            // are collapsed to spaces by boundText, matching the viewer's single-line context chips.
+            String quote = line >= 1 ? boundText(optString(body, "quote"), MAX_QUOTE_CHARS) : null;
             try {
-                store.addComment(id, line, text, ViewStore.currentUserId(), parentId, authorLabel);
+                store.addComment(id, line, text, ViewStore.currentUserId(), parentId, authorLabel, quote);
             } catch (IllegalArgumentException e) {
                 return JsonHttpResponse.error(400, e.getMessage());
             } catch (IllegalStateException e) {
@@ -990,6 +1171,9 @@ public class ApiRootAction implements UnprotectedRootAction {
 
     /** Bound for a display-only comment author label (mirrors the global config cap). */
     private static final int MAX_LABEL_CHARS = 64;
+
+    /** Bound for the verbatim highlighted-selection snippet stored with a comment (see the viewer). */
+    private static final int MAX_QUOTE_CHARS = 500;
 
     /** Bound for a version note (e.g. an AI edit summary) shown in the viewer's version dropdown. */
     private static final int MAX_VERSION_NOTE_CHARS = 280;

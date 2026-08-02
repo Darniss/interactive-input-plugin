@@ -29,8 +29,7 @@ public final class ExperimentalLayout {
             "jenkins.model.experimentalflags.NewBuildPageUserExperimentalFlag";
 
     /** Fully-qualified class name of core's new-job-page flag (resolved reflectively, never linked). */
-    private static final String NEW_JOB_PAGE_FLAG =
-            "jenkins.model.experimentalflags.NewJobPageUserExperimentalFlag";
+    private static final String NEW_JOB_PAGE_FLAG = "jenkins.model.experimentalflags.NewJobPageUserExperimentalFlag";
 
     private ExperimentalLayout() {}
 

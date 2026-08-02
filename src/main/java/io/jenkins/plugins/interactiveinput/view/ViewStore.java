@@ -172,6 +172,29 @@ public class ViewStore {
             @NonNull String byUserId,
             @CheckForNull String parentId,
             @CheckForNull String authorLabel) {
+        return addComment(id, line, body, byUserId, parentId, authorLabel, null);
+    }
+
+    /**
+     * Add a comment that also records the verbatim {@code quote} the reviewer highlighted (see the viewer's
+     * highlight-select flow). Anchoring still uses {@code line}; {@code quote} is display-only context, so a
+     * value is kept even when it is a sub-phrase of the line or spans several lines. Callers must pre-check
+     * permissions (the REST/UI layer's responsibility).
+     *
+     * @param quote the highlighted snippet to show back verbatim, or {@code null} for the "+"/general path
+     * @throws IllegalStateException    if the document is missing or not commentable
+     * @throws IllegalArgumentException if {@code parentId} does not reference an existing comment
+     */
+    @NonNull
+    @SuppressWarnings("checkstyle:ParameterNumber")
+    public ReviewComment addComment(
+            @NonNull String id,
+            int line,
+            @NonNull String body,
+            @NonNull String byUserId,
+            @CheckForNull String parentId,
+            @CheckForNull String authorLabel,
+            @CheckForNull String quote) {
         ReviewDocument doc = require(id);
         ReviewComment c;
         synchronized (doc) {
@@ -194,7 +217,8 @@ public class ViewStore {
                     byUserId,
                     System.currentTimeMillis(),
                     effectiveParent,
-                    authorLabel);
+                    authorLabel,
+                    quote);
             doc.addComment(c);
         }
         save();

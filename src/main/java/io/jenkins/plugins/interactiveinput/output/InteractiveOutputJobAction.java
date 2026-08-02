@@ -187,7 +187,8 @@ public class InteractiveOutputJobAction implements Action {
                 if (agg.buildLabels.isEmpty() || agg.seriesNames.isEmpty()) {
                     continue;
                 }
-                String resolved = MetricReport.CHART_BAR.equals(type) ? MetricReport.CHART_BAR : MetricReport.CHART_LINE;
+                String resolved =
+                        MetricReport.CHART_BAR.equals(type) ? MetricReport.CHART_BAR : MetricReport.CHART_LINE;
                 JSONObject model = new JSONObject();
                 model.put("report", name);
                 model.put("type", resolved);
@@ -217,8 +218,8 @@ public class InteractiveOutputJobAction implements Action {
      * {@code yyyy-MM-dd} and {@code yyyy-MM-dd[ T]HH:mm[:ss]}. Missing parts default to the start of the
      * period (month 1, day 1, 00:00:00), so points sort correctly regardless of granularity.
      */
-    private static final java.util.regex.Pattern TS_LABEL =
-            java.util.regex.Pattern.compile("^(\\d{4})(?:-(\\d{2})(?:-(\\d{2})(?:[ T](\\d{2}):(\\d{2})(?::(\\d{2}))?)?)?)?$");
+    private static final java.util.regex.Pattern TS_LABEL = java.util.regex.Pattern.compile(
+            "^(\\d{4})(?:-(\\d{2})(?:-(\\d{2})(?:[ T](\\d{2}):(\\d{2})(?::(\\d{2}))?)?)?)?$");
 
     /**
      * Builds the sorted {@code points} array for a {@code timeseries} chart from the latest build's numeric

@@ -22,6 +22,7 @@
   "use strict";
 
   var MAX_LINES_FOR_INLINE = 5000; // beyond this, fall back to a single block (general comments only)
+  var MAX_QUOTE_CHARS = 500; // client cap for the highlighted-selection snippet (server re-bounds to match)
 
   // ---------------------------------------------------------------- DOM + HTTP helpers
   function el(tag, opts) {
@@ -77,6 +78,27 @@
     return "Request failed";
   }
 
+  // Inline-comment interaction mode (item #4), persisted per-user in localStorage. "highlight" (default) =
+  // select text then click a floating "Add comment"; "plus" = the original hover-"+" affordance. Reads are
+  // defensive so a browser with localStorage disabled (privacy mode) still works (falls back to highlight).
+  var COMMENT_MODE_KEY = "ii-view-comment-mode";
+
+  function getCommentMode() {
+    try {
+      return window.localStorage.getItem(COMMENT_MODE_KEY) === "plus" ? "plus" : "highlight";
+    } catch (e) {
+      return "highlight";
+    }
+  }
+
+  function setCommentMode(mode) {
+    try {
+      window.localStorage.setItem(COMMENT_MODE_KEY, mode === "plus" ? "plus" : "highlight");
+    } catch (e) {
+      /* localStorage unavailable (e.g. privacy mode): the choice just will not persist across reloads */
+    }
+  }
+
   // ---------------------------------------------------------------- per-mount controller
   function mount(root) {
     var rootUrl = (root.getAttribute("data-root-url") || "").replace(/\/$/, "");
@@ -89,9 +111,29 @@
       detail: null,
       mode: "rendered", // "rendered" | "source" | "edit"
       selectedLine: 0, // 0 = none; the EXACT source line a new comment anchors to (Source row or Rendered element)
+      // The verbatim text the reviewer highlighted for the pending (not-yet-posted) comment on selectedLine,
+      // or "" when the line thread was opened via the "+" affordance. Sent with the comment as `quote` and
+      // shown back verbatim, so a sub-phrase or a multi-line selection is preserved instead of the whole line.
+      pendingQuote: "",
       viewingVersion: 0, // 0 = latest
       versionContent: null, // content of a non-latest version being viewed
     };
+
+    // Highlight-mode "Add comment" popup (#4): a single reused button shown at a text selection. Global
+    // listeners hide it on any new mousedown (except on the button itself) or on scroll; onPaneMouseUp
+    // re-shows it after a drag-select. Appended to <body> so it survives the per-render rebuild of the panes.
+    var floatBtn = null;
+    var floatLine = 0;
+    var floatQuote = ""; // verbatim text of the current selection, captured for the floating "Add comment"
+    document.addEventListener(
+      "mousedown",
+      function (e) {
+        if (floatBtn && e.target === floatBtn) return; // clicking the popup: let its own click handler run
+        hideFloatBtn();
+      },
+      true
+    );
+    document.addEventListener("scroll", hideFloatBtn, true);
 
     function viewUrl(id) {
       return apiBase + "/views/" + encodeURIComponent(id);
@@ -206,10 +248,35 @@
             text: g.grouped ? g.items.length + " files" : g.items.length + " item",
           }));
           if (g.notify) head.appendChild(el("span", { cls: "iv-flag iv-flag-notified", text: "Notified" }));
+          // "Download all (.zip)" for a real multi-file group; a lone file uses its per-card Download below.
+          if (g.grouped) {
+            head.appendChild(el("a", {
+              cls: "iv-group-download",
+              text: "Download all (.zip)",
+              attrs: {
+                href: apiBase + "/views/" + encodeURIComponent(g.items[0].id) + "/downloadGroup",
+                download: "",
+                title: "Download all files in this group as a zip",
+              },
+            }));
+          }
           section.appendChild(head);
           var list = el("div", { cls: "iv-list" });
           g.items.forEach(function (v) {
-            list.appendChild(listCard(v));
+            // The card is an <a>; keep the per-file download as a SIBLING (an <a> nested in an <a> is
+            // invalid HTML and would break navigation).
+            var wrap = el("div", { cls: "iv-list-card-wrap" });
+            wrap.appendChild(listCard(v));
+            wrap.appendChild(el("a", {
+              cls: "iv-list-download",
+              text: "Download",
+              attrs: {
+                href: apiBase + "/views/" + encodeURIComponent(v.id) + "/download",
+                download: "",
+                title: "Download this file",
+              },
+            }));
+            list.appendChild(wrap);
           });
           section.appendChild(list);
           listWrap.appendChild(section);
@@ -269,6 +336,17 @@
       return state.detail.content || "";
     }
 
+    // A short, whitespace-collapsed, length-bounded snippet of source line n, for comment context (#5).
+    // Always rendered via textContent / an attribute (never innerHTML), so a line can never inject markup.
+    function lineSnippet(n) {
+      if (!(n >= 1)) return "";
+      var raw = currentContent().split(/\r\n|\r|\n/)[n - 1];
+      if (raw == null) return "";
+      var s = raw.replace(/\s+/g, " ").trim();
+      if (!s) return "";
+      return s.length > 50 ? s.slice(0, 50).trim() + "\u2026" : s;
+    }
+
     // Apply a mutation response to state.detail WITHOUT dropping the heavy content/renderedHtml fields
     // if a response omits them. The server now always returns the full document for mutations, but this
     // keeps the left pane from blanking should any endpoint ever return a summary-only payload (the
@@ -290,6 +368,9 @@
     function render() {
       var d = state.detail;
       clear(root);
+      hideFloatBtn();
+      // Highlight mode hides the "+" affordances via CSS (count markers stay); plus mode restores them.
+      root.classList.toggle("iv-mode-highlight", getCommentMode() === "highlight");
       root.appendChild(buildHeader(d));
       root.appendChild(buildToolbar(d));
 
@@ -302,6 +383,8 @@
 
       renderContent(left);
       renderComments(right);
+      // Highlight-select commenting listens on the content pane; guarded by mode/permissions inside.
+      left.addEventListener("mouseup", onPaneMouseUp);
     }
 
     function buildHeader(d) {
@@ -347,6 +430,29 @@
         leftGrp.appendChild(seg);
       }
 
+      // Inline-comment mode toggle (#4): Highlight (select text) vs Plus (hover +). Shown whenever
+      // commenting is possible; the choice persists per-user in localStorage and re-renders to apply.
+      if (d.commentable && d.canContribute && isLatest()) {
+        var modeSeg = el("div", { cls: "iv-seg iv-comment-mode" });
+        modeSeg.appendChild(
+          segBtn("Highlight", getCommentMode() === "highlight", function () {
+            if (getCommentMode() !== "highlight") {
+              setCommentMode("highlight");
+              render();
+            }
+          })
+        );
+        modeSeg.appendChild(
+          segBtn("Plus", getCommentMode() === "plus", function () {
+            if (getCommentMode() !== "plus") {
+              setCommentMode("plus");
+              render();
+            }
+          })
+        );
+        leftGrp.appendChild(modeSeg);
+      }
+
       // Version selector
       if (d.versions && d.versions.length > 1) {
         var sel = el("select", { cls: "jenkins-select__input iv-version" });
@@ -374,6 +480,26 @@
           }
         });
         leftGrp.appendChild(sel);
+      }
+
+      // Downloads (item #1): this file, and — for a multi-file group (glob/dir) — the whole group as a zip.
+      // Shown for any status/mode (a read-only GET). The <a download> plus the server's Content-Disposition
+      // header drives the browser save; permissions are enforced server-side (Item.READ, else 404).
+      leftGrp.appendChild(el("a", {
+        cls: "jenkins-button iv-download",
+        text: "Download",
+        attrs: { href: viewUrl(docId) + "/download", download: "", title: "Download this file" },
+      }));
+      if (d.grouped) {
+        leftGrp.appendChild(el("a", {
+          cls: "jenkins-button iv-download",
+          text: "Download all (.zip)",
+          attrs: {
+            href: viewUrl(docId) + "/downloadGroup",
+            download: "",
+            title: "Download every file in this group as a zip",
+          },
+        }));
       }
       bar.appendChild(leftGrp);
 
@@ -483,6 +609,91 @@
         .catch(function () {
           flash("Could not save changes.", true);
         });
+    }
+
+    // ---- highlight-select commenting (#4) ----
+    // In highlight mode the reviewer selects text in a line and clicks a floating "Add comment" button,
+    // which resolves the selection's source line (a Source row via .iv-line[data-line], or the innermost
+    // rendered element via [data-source-line]) and opens that line's thread — reusing the exact same
+    // per-line comment model as the "+" affordance, so a comment round-trips to the pipeline unchanged.
+    function ensureFloatBtn() {
+      if (floatBtn) return floatBtn;
+      floatBtn = el("button", { cls: "iv-float-add", text: "Add comment", attrs: { type: "button" } });
+      floatBtn.style.display = "none";
+      // mousedown preventDefault keeps the text selection from collapsing before the click handler runs.
+      floatBtn.addEventListener("mousedown", function (e) {
+        e.preventDefault();
+      });
+      floatBtn.addEventListener("click", function () {
+        var line = floatLine;
+        var quote = floatQuote;
+        hideFloatBtn();
+        var sel = window.getSelection && window.getSelection();
+        if (sel && sel.removeAllRanges) sel.removeAllRanges();
+        // Anchor at the selection's FIRST line and carry the exact highlighted text so the comment reflects
+        // whatever was selected (a sub-phrase, or text spanning several lines) rather than the whole line.
+        if (line >= 1) selectLine(line, quote);
+      });
+      document.body.appendChild(floatBtn);
+      return floatBtn;
+    }
+
+    function hideFloatBtn() {
+      if (floatBtn) floatBtn.style.display = "none";
+      floatLine = 0;
+      floatQuote = "";
+    }
+
+    // Resolve the 1-based source line a DOM node sits on (a Source row via .iv-line[data-line], or the
+    // innermost rendered element via [data-source-line]); 0 if none/unresolvable.
+    function lineOfNode(node) {
+      var eln = node && node.nodeType === 1 ? node : node && node.parentElement;
+      if (!eln || typeof eln.closest !== "function") return 0;
+      var srcRow = eln.closest(".iv-line[data-line]");
+      if (srcRow) return parseInt(srcRow.getAttribute("data-line"), 10) || 0;
+      var anchor = eln.closest("[data-source-line]");
+      return anchor ? parseInt(anchor.getAttribute("data-source-line"), 10) || 0 : 0;
+    }
+
+    // Describe a non-empty text selection: its anchor line (the FIRST source line it touches, so a top-down
+    // or bottom-up drag resolves the same way) and its verbatim text (whitespace-collapsed and bounded).
+    // Returns { line: 0, text: "" } when there is nothing usable to comment on.
+    function selectionInfo(sel) {
+      if (!sel || sel.isCollapsed || !sel.rangeCount) return { line: 0, text: "" };
+      var text = String(sel).replace(/\s+/g, " ").trim();
+      if (!text) return { line: 0, text: "" };
+      var r = sel.getRangeAt(0);
+      var startLine = lineOfNode(r.startContainer);
+      var endLine = lineOfNode(r.endContainer);
+      var line = startLine >= 1 && endLine >= 1 ? Math.min(startLine, endLine) : startLine || endLine;
+      if (text.length > MAX_QUOTE_CHARS) text = text.slice(0, MAX_QUOTE_CHARS).trim() + "\u2026";
+      return { line: line, text: text };
+    }
+
+    function onPaneMouseUp() {
+      var d = state.detail;
+      if (getCommentMode() !== "highlight" || !d || !d.commentable || !d.canContribute || !isLatest()) {
+        return;
+      }
+      var sel = window.getSelection && window.getSelection();
+      var info = selectionInfo(sel);
+      if (info.line < 1) {
+        hideFloatBtn();
+        return;
+      }
+      var rect = sel.getRangeAt(0).getBoundingClientRect();
+      if (!rect || (rect.width === 0 && rect.height === 0)) {
+        hideFloatBtn();
+        return;
+      }
+      var btn = ensureFloatBtn();
+      floatLine = info.line;
+      floatQuote = info.text;
+      btn.style.display = "block";
+      // position:fixed -> viewport coordinates; place just above the selection, or below if near the top.
+      var top = rect.top - 34;
+      btn.style.top = (top < 4 ? rect.bottom + 6 : top) + "px";
+      btn.style.left = Math.max(4, rect.left) + "px";
     }
 
     // ---- content pane ----
@@ -625,8 +836,12 @@
       }
     }
 
-    function selectLine(n) {
+    // Open the thread for source line n. `quote` (optional) is the verbatim highlighted text to attach to the
+    // next comment; callers that open a line via the "+"/marker/nav paths pass none, which clears any stale
+    // pending quote so those comments stay whole-line as before.
+    function selectLine(n, quote) {
       state.selectedLine = n;
+      state.pendingQuote = quote || "";
       // Update the selection highlight in whichever view is showing (Source rows and/or Rendered
       // anchors), without a full re-render.
       var prev = root.querySelectorAll(".iv-line.selected, .iv-anchor.selected");
@@ -675,10 +890,16 @@
       if (state.selectedLine >= 1) {
         var ln = state.selectedLine;
         var titleRow = el("div", { cls: "iv-line-thread-head" });
-        titleRow.appendChild(el("h2", { cls: "iv-thread-title", text: "Line " + ln }));
+        var headTitle = el("h2", { cls: "iv-thread-title", text: "Line " + ln });
+        var headSnip = lineSnippet(ln);
+        if (headSnip) {
+          headTitle.appendChild(el("span", { cls: "iv-line-snippet", text: " \u00b7 \u201c" + headSnip + "\u201d" }));
+        }
+        titleRow.appendChild(headTitle);
         var clearBtn = el("button", { cls: "iv-clear-line", text: "\u00d7", attrs: { type: "button", title: "Clear selection" } });
         clearBtn.addEventListener("click", function () {
           state.selectedLine = 0;
+          state.pendingQuote = "";
           var selRows = root.querySelectorAll(".iv-line.selected, .iv-anchor.selected");
           for (var i = 0; i < selRows.length; i++) selRows[i].classList.remove("selected");
           renderComments(right);
@@ -691,10 +912,14 @@
         appendCommentList(lineThread, lineComments);
         if (canComment) lineThread.appendChild(buildComposer(ln));
       } else {
-        var hintText =
-          state.mode === "rendered"
-            ? "Hover any line and click + to comment on it."
-            : "Click the + on any line to comment on it.";
+        var hintText;
+        if (getCommentMode() === "highlight") {
+          hintText = "Select any text in the document, then click \u201cAdd comment\u201d.";
+        } else if (state.mode === "rendered") {
+          hintText = "Hover any line and click + to comment on it.";
+        } else {
+          hintText = "Click the + on any line to comment on it.";
+        }
         lineThread.appendChild(el("div", { cls: "iv-hint", text: hintText }));
       }
       right.appendChild(lineThread);
@@ -710,7 +935,10 @@
         lineNums.forEach(function (n) {
           var item = el("button", { cls: "iv-line-nav-item" });
           item.appendChild(el("span", { cls: "iv-chip", text: "L" + n }));
-          item.appendChild(el("span", { text: byLine[n].length + " comment(s)" }));
+          var navSnip = lineSnippet(n);
+          item.appendChild(el("span", { cls: "iv-line-nav-text", text: navSnip || "line " + n }));
+          item.appendChild(el("span", { cls: "iv-line-nav-count", text: String(byLine[n].length) }));
+          item.title = "Line " + n + (navSnip ? ": " + navSnip : "") + " \u2014 " + byLine[n].length + " comment(s)";
           item.addEventListener("click", function () {
             if (state.mode !== "source") {
               state.mode = "source";
@@ -785,6 +1013,8 @@
       // A reply inherits its parent's location, so only root comments carry the clickable line chip.
       if (!isReply && c.line >= 1) {
         var chip = el("button", { cls: "iv-chip iv-chip-line", text: "L" + c.line });
+        var chipSnip = lineSnippet(c.line);
+        chip.title = chipSnip ? "Line " + c.line + ": " + chipSnip : "Line " + c.line;
         chip.addEventListener("click", function () {
           if (state.mode !== "source") {
             state.mode = "source";
@@ -795,6 +1025,12 @@
         head.appendChild(chip);
       }
       item.appendChild(head);
+      // The verbatim text this comment was highlighted on (highlight mode), shown back as quoted context
+      // above the body so a sub-phrase or multi-line selection is preserved. textContent (via el's `text`) —
+      // never innerHTML — so the quoted source can never inject markup.
+      if (typeof c.quote === "string" && c.quote.length > 0) {
+        item.appendChild(el("div", { cls: "iv-comment-quote", text: "\u201c" + c.quote + "\u201d" }));
+      }
       // bodyHtml is server-sanitised markdown (MarkdownRenderer) — safe to insert.
       item.appendChild(el("div", { cls: "iv-comment-body", html: c.bodyHtml || "" }));
 
@@ -821,7 +1057,27 @@
     // a general (unanchored) comment.
     function buildComposer(line) {
       var wrap = el("div", { cls: "iv-composer" });
-      var ta = el("textarea", { attrs: { rows: "3", placeholder: line >= 1 ? "Comment on line " + line + " (markdown)\u2026" : "Add a general comment (markdown)\u2026" } });
+      // The verbatim highlighted text for this pending comment (highlight mode only). Shown back above the
+      // box and sent as `quote` so the comment reflects exactly what was selected — a sub-phrase, or text
+      // spanning several lines — instead of the whole anchor line.
+      var quote = line >= 1 ? state.pendingQuote || "" : "";
+      var placeholder;
+      if (quote) {
+        var qbox = el("div", { cls: "iv-composer-quote" });
+        qbox.appendChild(el("span", { cls: "iv-quote-label", text: "Commenting on your selection:" }));
+        // textContent (via el's `text`) — never innerHTML — so highlighted markup/markdown can never inject.
+        qbox.appendChild(el("span", { cls: "iv-quote-text", text: "\u201c" + quote + "\u201d" }));
+        wrap.appendChild(qbox);
+        placeholder = "Add your comment on the highlighted text (markdown)\u2026";
+      } else if (line >= 1) {
+        var snip = lineSnippet(line);
+        placeholder = snip
+          ? "Comment on line " + line + " \u201c" + snip + "\u201d (markdown)\u2026"
+          : "Comment on line " + line + " (markdown)\u2026";
+      } else {
+        placeholder = "Add a general comment (markdown)\u2026";
+      }
+      var ta = el("textarea", { attrs: { rows: "3", placeholder: placeholder } });
       wrap.appendChild(ta);
       var row = el("div", { cls: "iv-composer-row" });
       var err = el("span", { cls: "iv-composer-err" });
@@ -836,6 +1092,7 @@
         submit.disabled = true;
         var payload = { body: body };
         if (line >= 1) payload.line = line;
+        if (quote) payload.quote = quote;
         postJson(viewUrl(docId) + "/comments", payload)
           .then(function (res) {
             submit.disabled = false;
@@ -844,6 +1101,9 @@
               return;
             }
             applyDetail(res.body);
+            // The quote belongs to this one comment; clear it so a follow-up comment on the same line is
+            // whole-line again unless the reviewer highlights afresh.
+            state.pendingQuote = "";
             // A line comment adds a gutter marker on the content pane, so re-render both panes (the
             // selection persists via state.selectedLine); a general comment only touches the right.
             if (line >= 1) {

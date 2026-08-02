@@ -48,13 +48,13 @@ public final class BuildLifecycleCleanup {
             try {
                 QuestionStore.get().removeForBuild(job, number);
             } catch (RuntimeException e) {
-                LOGGER.log(Level.WARNING, e, () -> "failed to purge questions for deleted build " + job + " #" + number);
+                LOGGER.log(
+                        Level.WARNING, e, () -> "failed to purge questions for deleted build " + job + " #" + number);
             }
             try {
                 ViewStore.get().markBuildDeletedForBuild(job, number);
             } catch (RuntimeException e) {
-                LOGGER.log(
-                        Level.WARNING, e, () -> "failed to mark reviews for deleted build " + job + " #" + number);
+                LOGGER.log(Level.WARNING, e, () -> "failed to mark reviews for deleted build " + job + " #" + number);
             }
         }
     }
