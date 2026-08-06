@@ -23,10 +23,10 @@ import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
  * The fix snapshots per-question drafts before navigating and restores them, rendering each slide from
  * the already-fetched list item instead of re-fetching.
  *
- * <p>Drives the real UI in HtmlUnit through the <em>only</em> remaining entry point to the series pager:
- * a build-history badge for a single build that has more than one waiting question. (The "Answer all"
- * button was removed — it was never requested.) The badge is normally emitted by the async build-history
- * widget, which is out of scope here, so the test injects one and clicks it; the click is handled by the
+ * <p>Drives the real UI in HtmlUnit through one entry point to the series pager: a build-history badge
+ * for a single build that has more than one waiting question. (Every other surface reaches the same pager
+ * — see {@link SeriesEntryPointsTest}.) The badge is normally emitted by the async build-history widget,
+ * which is out of scope here, so the test injects one and clicks it; the click is handled by the
  * document-level delegated handler exactly as it is for a real badge. It then types into slide 1, pages to
  * slide 2 and back, and asserts the draft survived.
  */

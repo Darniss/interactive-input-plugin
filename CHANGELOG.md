@@ -275,6 +275,29 @@ All notable changes to this project are documented here. The format follows
   longer stays stale until a full page reload.
 
 ### Fixed
+- **Every surface now opens a build's multi-question "series" as one numbered stepper.** Observed failure
+  (reported with screenshots, reproduced live on 2.568.1 with three `askInteractive` questions published in
+  parallel on one build): clicking a question in the **global notification centre** — or the *"Open
+  interactive input"* link in the **console log** — opened a lone single-question dialog, while the
+  build-history dot on the same build correctly opened the numbered pager (`‹ Prev · 1 / 3 · Next ›` plus
+  pips). Root cause: the "this build has more than one waiting question → open the pager" decision was
+  re-implemented inside three call sites (the build-history badge, the run-page attention box and the
+  console auto-open), so the surfaces that open a *named* question — the bell dropdown, the console
+  `data-ii-open` link, the `?open=<id>` deep link, the inline job-page box and the per-build audit list —
+  never reached it and always rendered one question. Fix (`bell.js`): a single shared decision
+  (`openWaiting` for a build's waiting list, `openQuestionInSeries` for a named question, which resolves
+  its build-mates with one scoped `GET` on click) that **every** entry point routes through, so the same
+  series is reachable as a set from anywhere. The pager now also opens on the question that was actually
+  clicked (new `startId`), rather than always on slide 1. Behaviour is unchanged for a build with a single
+  waiting question, for settled (read-only) questions, and when the rich modal is switched off — that still
+  navigates to the build's native input page.
+- **A build's questions are listed in the order the pipeline asked them.** Observed failure (same
+  reproduction): the notification centre listed a three-question series as *Q2, Q3, Q1*, so the stepper's
+  slide 1 was not the first question asked. Root cause: every `QuestionStore` query iterated the backing
+  `ConcurrentHashMap`, whose order is arbitrary. Fix: all list queries (`listAnswerable`, `listReadable`,
+  `listAll`, `listAnswerableForJob`, `listReadableForJob`, `listForBuild` and the notification collector)
+  now return oldest-first by `createdTs`, tie-broken by id, which also makes the REST list responses and the
+  per-build audit page deterministic.
 - **Interactive View now renders a pipe table that a generator wrapped in a bare code fence.** Observed
   failure (live doc `a2571a80…`): a GFM table nested inside a bullet was emitted inside an **un-languaged**
   fenced code block, so commonmark — correctly per spec — rendered it verbatim as a `<pre><code>`

@@ -927,8 +927,9 @@
   // ================================ series pager ================================
   // A single modal that pages through a *series* of questions with numbered navigation (‹ 2 / 5 ›
   // plus clickable numbered pips). Answering advances to the next still-waiting question in place;
-  // already-answered ones render read-only so you can review what was chosen. Opened from a build's
-  // history badge when that single build (e.g. an agent) has more than one waiting question.
+  // already-answered ones render read-only so you can review what was chosen. A series is a build's
+  // set of waiting questions (several published at once, e.g. by an agent); every surface reaches it
+  // through openWaiting / openQuestionInSeries below.
   function buildSeriesNav(ctx) {
     const nav = el("div", { cls: "ii-series-nav" });
     const row = el("div", { cls: "ii-series-row" });
@@ -985,7 +986,19 @@
     // straight from them — the previous per-navigation re-fetch is what rebuilt the form empty and
     // dropped the draft.
     const drafts = {};
-    const ctx = { list: list, index: 0, answered: answered };
+    // Surfaces that open a named question (a bell row, a console link, a deep link) pass its id as
+    // startId so the pager opens on the slide the user actually asked for; a surface that opens a whole
+    // build's list passes none and starts at the first question.
+    let start = 0;
+    if (opts.startId) {
+      for (let i = 0; i < list.length; i++) {
+        if (list[i].id === opts.startId) {
+          start = i;
+          break;
+        }
+      }
+    }
+    const ctx = { list: list, index: start, answered: answered };
 
     // Snapshot the current slide's in-progress answer before we navigate away from it.
     function captureDraft() {
@@ -1049,7 +1062,47 @@
       if (opts.onDone) opts.onDone();
     };
 
-    ctx.goTo(0);
+    ctx.goTo(start);
+  }
+
+  // Open a build's waiting questions: the numbered pager for a series, the plain dialog for a single
+  // one. This is the ONE place that decision is made, so every surface behaves the same — previously
+  // each caller re-implemented it and the surfaces that opened a *named* question (bell row, console
+  // link, deep link, job box, audit row) silently bypassed the pager and offered one question at a time.
+  function openWaiting(waiting, opts) {
+    if (waiting.length > 1) {
+      openSeries(waiting, opts);
+    } else if (waiting.length === 1) {
+      openQuestion(waiting[0], opts);
+    }
+  }
+
+  // Open one named question in the context of its build's series, paged to that question. Used by the
+  // surfaces that start from a single question and so have to look its build-mates up first: one scoped
+  // GET on click (no extra polling). Every failure path — a question with no build reference, a failed
+  // lookup, or a build with nothing else waiting — falls back to the plain single-question dialog, so a
+  // click can never dead-end.
+  function openQuestionInSeries(q, opts) {
+    opts = opts || {};
+    const richModal = opts.richModal != null ? opts.richModal : richModalDefault;
+    // With the rich modal off, opening a question NAVIGATES to the build's native input page (see
+    // openQuestion). Keep that contract instead of pulling the operator into a dialog they turned off.
+    if (!richModal || !q || !q.jobFullName || q.buildNumber == null) {
+      openQuestion(q, opts);
+      return;
+    }
+    fetchJson(apiBase + "/questions?job=" + encodeURIComponent(q.jobFullName))
+      .then(function (r) {
+        const waiting = r.ok ? waitingForBuild(r.body, q.buildNumber) : [];
+        if (waiting.length > 1) {
+          openSeries(waiting, { richModal: richModal, onDone: opts.onDone, startId: q.id });
+        } else {
+          openQuestion(q, opts);
+        }
+      })
+      .catch(function () {
+        openQuestion(q, opts);
+      });
   }
 
   // ----- shared visibility-aware polling loop -----
@@ -1329,7 +1382,7 @@
           item.appendChild(
             questionListItem(q, function () {
               toggleDropdown(false);
-              openQuestion(q, { richModal: richModal, onDone: refresh });
+              openQuestionInSeries(q, { richModal: richModal, onDone: refresh });
             })
           );
           list.appendChild(item);
@@ -1460,7 +1513,7 @@
         return questionListItem(
           q,
           function () {
-            openQuestion(q, { richModal: richModal, onDone: refresh });
+            openQuestionInSeries(q, { richModal: richModal, onDone: refresh });
           },
           { withBar: true }
         );
@@ -1491,7 +1544,7 @@
           // same one the job page opens), not the read-only audit view. Settled questions stay
           // read-only. This is what makes Approve/Deny work from the run page.
           if (!q.status || q.status === "WAITING") {
-            openQuestion(q, { richModal: richModal, onDone: refresh });
+            openQuestionInSeries(q, { richModal: richModal, onDone: refresh });
           } else {
             openQuestion(q, { readOnly: true });
           }
@@ -1738,12 +1791,7 @@
         const onDone = function () {
           refreshBadge(badge, job, build);
         };
-        // A build with several waiting questions opens the series pager; a single one opens directly.
-        if (waiting.length > 1) {
-          openSeries(waiting, { richModal: richModalDefault, onDone: onDone });
-        } else {
-          openQuestion(waiting[0], { richModal: richModalDefault, onDone: onDone });
-        }
+        openWaiting(waiting, { richModal: richModalDefault, onDone: onDone });
       })
       .catch(noop);
   }
@@ -1800,7 +1848,7 @@
         }
         const q = r.body;
         if (!q.status || q.status === "WAITING") {
-          openQuestion(q, { richModal: richModalDefault });
+          openQuestionInSeries(q, { richModal: richModalDefault });
         } else {
           openQuestion(q, { readOnly: true });
         }
@@ -1859,11 +1907,7 @@
         .then(function (r) {
           const waiting = r.ok ? waitingForBuild(r.body, build) : [];
           reveal(waiting);
-          if (waiting.length > 1) {
-            openSeries(waiting, { richModal: richModal, onDone: refresh });
-          } else if (waiting.length === 1) {
-            openQuestion(waiting[0], { richModal: richModal, onDone: refresh });
-          }
+          openWaiting(waiting, { richModal: richModal, onDone: refresh });
         })
         .catch(noop);
     });
@@ -1938,11 +1982,7 @@
           return;
         }
         markPoppedThisSession(job, build);
-        if (waiting.length > 1) {
-          openSeries(waiting, { richModal: richModal });
-        } else {
-          openQuestion(waiting[0], { richModal: richModal });
-        }
+        openWaiting(waiting, { richModal: richModal });
       })
       .catch(noop);
   }
@@ -1995,7 +2035,7 @@
         }
         const q = r.body;
         if (!q.status || q.status === "WAITING") {
-          openQuestion(q, { richModal: richModalDefault });
+          openQuestionInSeries(q, { richModal: richModalDefault });
         } else {
           openQuestion(q, { readOnly: true });
         }

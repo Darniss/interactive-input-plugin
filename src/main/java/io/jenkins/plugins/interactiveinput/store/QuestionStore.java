@@ -19,6 +19,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -250,6 +251,24 @@ public class QuestionStore {
     // Queries
     // ----------------------------------------------------------------------------------------
 
+    /**
+     * Listing order for every query below: oldest first — the order the pipeline asked the questions —
+     * tie-broken by id so equal timestamps still yield a stable sequence.
+     *
+     * <p>The backing map is a {@link ConcurrentHashMap}, whose iteration order is arbitrary. Without this
+     * the notification centre, the per-build audit list and the multi-question "series" pager all showed a
+     * build's questions in an unrelated order, so the pager's slide 1 was not the first question asked.
+     */
+    private static final Comparator<Question> BY_CREATION =
+            Comparator.comparingLong(Question::getCreatedTs).thenComparing(Question::getId);
+
+    /** Sort {@code out} into {@link #BY_CREATION} order and return it (the caller owns the list). */
+    @NonNull
+    private static List<Question> sorted(@NonNull List<Question> out) {
+        out.sort(BY_CREATION);
+        return out;
+    }
+
     @CheckForNull
     public Question get(@NonNull String questionId) {
         return questions.get(questionId);
@@ -284,7 +303,7 @@ public class QuestionStore {
                 out.add(q);
             }
         }
-        return out;
+        return sorted(out);
     }
 
     /** @return all WAITING questions the current user can at least read (Item.READ on the source job). */
@@ -296,7 +315,7 @@ public class QuestionStore {
                 out.add(q);
             }
         }
-        return out;
+        return sorted(out);
     }
 
     /** @return every WAITING question (admin only; callers must enforce {@code Overall/Administer}). */
@@ -308,7 +327,7 @@ public class QuestionStore {
                 out.add(q);
             }
         }
-        return out;
+        return sorted(out);
     }
 
     // ---- Per-project (job/build) scoped queries (§per-project notification centre) ----
@@ -322,7 +341,7 @@ public class QuestionStore {
                 out.add(q);
             }
         }
-        return out;
+        return sorted(out);
     }
 
     /** @return WAITING questions for {@code jobFullName} the current user can at least read. */
@@ -334,7 +353,7 @@ public class QuestionStore {
                 out.add(q);
             }
         }
-        return out;
+        return sorted(out);
     }
 
     /** @return the number of WAITING questions for {@code jobFullName} the current user may answer. */
@@ -354,7 +373,7 @@ public class QuestionStore {
                 out.add(q);
             }
         }
-        return out;
+        return sorted(out);
     }
 
     /** @return {@code true} if {@code jobFullName} #{@code buildNumber} has any WAITING question. */
@@ -469,7 +488,7 @@ public class QuestionStore {
                 out.add(q);
             }
         }
-        return out;
+        return sorted(out);
     }
 
     private boolean isNotification(@NonNull Question q, @NonNull String uid, boolean userScoped, boolean lock) {

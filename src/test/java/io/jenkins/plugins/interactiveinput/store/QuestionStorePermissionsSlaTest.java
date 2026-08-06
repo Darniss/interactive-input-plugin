@@ -104,6 +104,31 @@ class QuestionStorePermissionsSlaTest {
     }
 
     @Test
+    void listsAreOrderedByCreationTime(JenkinsRule j) throws Exception {
+        secure(j);
+        QuestionStore store = QuestionStore.get();
+        // The backing map is a ConcurrentHashMap, so without an explicit order the surfaces (notification
+        // centre, per-build audit list, multi-question series pager) showed a build's questions in an
+        // arbitrary order. The ids are deliberately created NEWEST-first so a listing that leaks the map's
+        // iteration order cannot pass by coincidence.
+        long t0 = System.currentTimeMillis() - 60_000L;
+        store.submit(question("o2", null, 0L, t0 + 1_000L));
+        store.submit(question("o1", null, 0L, t0 + 2_000L));
+        store.submit(question("o3", null, 0L, t0));
+
+        List<String> byCreation = List.of("o3", "o2", "o1");
+        as("builder", () -> {
+            assertEquals(byCreation, ids(store.listAnswerableForJob(JOB)));
+            assertEquals(byCreation, ids(store.listForBuild(JOB, 1)));
+            assertEquals(byCreation, ids(store.listNotificationsForJob(JOB)));
+            assertEquals(byCreation, ids(store.listNotifications()));
+            assertEquals(byCreation, ids(store.listAnswerable()));
+            assertEquals(byCreation, ids(store.listAll()));
+        });
+        as("reader", () -> assertEquals(byCreation, ids(store.listReadableForJob(JOB))));
+    }
+
+    @Test
     void expireOverdueMarksExpired(JenkinsRule j) throws Exception {
         secure(j);
         QuestionStore store = QuestionStore.get();
@@ -132,6 +157,10 @@ class QuestionStorePermissionsSlaTest {
     }
 
     // ---- helpers ----
+
+    private static List<String> ids(List<Question> questions) {
+        return questions.stream().map(Question::getId).toList();
+    }
 
     private static void secure(JenkinsRule j) throws Exception {
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
