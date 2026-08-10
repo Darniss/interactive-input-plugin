@@ -317,7 +317,7 @@
           state.detail = res.body;
           state.selectedLine = keepLine;
           if (state.mode !== "source" && state.mode !== "edit") {
-            state.mode = res.body.renderedHtml != null ? "rendered" : "source";
+            state.mode = hasRenderedView(res.body) ? "rendered" : "source";
           }
           render();
         })
@@ -329,6 +329,12 @@
 
     function isLatest() {
       return state.viewingVersion === 0 || state.viewingVersion === state.detail.currentVersion;
+    }
+
+    // Whether this document has a "Rendered" view at all: markdown carries sanitised HTML inline, while
+    // an HTML snapshot is loaded into the sandboxed frame from the server (see renderHtmlFrame).
+    function hasRenderedView(d) {
+      return d != null && (d.renderedHtml != null || d.htmlRenderable === true);
     }
 
     function currentContent() {
@@ -414,8 +420,9 @@
       var bar = el("div", { cls: "iv-toolbar" });
       var leftGrp = el("div", { cls: "iv-toolbar-grp" });
 
-      // Rendered / Source toggle (only when markdown provided a rendered view)
-      if (d.renderedHtml != null) {
+      // Rendered / Source toggle: markdown supplies rendered HTML inline, an HTML snapshot is rendered
+      // in the sandboxed frame (htmlRenderable). Everything else is source-only, so no toggle.
+      if (hasRenderedView(d)) {
         var seg = el("div", { cls: "iv-seg" });
         seg.appendChild(segBtn("Rendered", state.mode === "rendered", function () {
           if (state.mode === "edit") return;
@@ -512,7 +519,7 @@
           save.addEventListener("click", saveEdit);
           var cancel = el("button", { cls: "jenkins-button", text: "Cancel" });
           cancel.addEventListener("click", function () {
-            state.mode = d.renderedHtml != null ? "rendered" : "source";
+            state.mode = hasRenderedView(d) ? "rendered" : "source";
             render();
           });
           rightGrp.appendChild(save);
@@ -602,7 +609,7 @@
           applyDetail(res.body);
           state.viewingVersion = 0;
           state.versionContent = null;
-          state.mode = state.detail.renderedHtml != null ? "rendered" : "source";
+          state.mode = hasRenderedView(state.detail) ? "rendered" : "source";
           render();
           flash("Saved new version v" + state.detail.currentVersion + ".", false);
         })
@@ -714,7 +721,52 @@
         decorateRenderedBlocks(rendered);
         return;
       }
+      if (state.mode === "rendered" && d.htmlRenderable === true) {
+        renderHtmlFrame(left);
+        return;
+      }
       renderSource(left);
+    }
+
+    // Render an HTML snapshot in a sandboxed frame. The document is pipeline-generated and therefore
+    // untrusted, so it is NEVER inserted into this page: it is loaded from /rendered, which serves it
+    // under "Content-Security-Policy: sandbox allow-scripts". The sandbox attribute repeats that policy
+    // here (two independent enforcement points). Withholding allow-same-origin is the crucial part — the
+    // frame gets a unique opaque origin, so its scripts can run (a generated report is usually 100%
+    // script-driven and shows nothing without them) yet cannot read this page, the session cookie or a
+    // CSRF crumb. allow-forms / allow-popups / allow-top-navigation are withheld too, so it cannot post
+    // a form, open a window or navigate the reviewer away.
+    //
+    // Because the frame is cross-origin to us we cannot inject the inline-comment affordances into it, so
+    // this view is read-only; per-line commenting stays on the Source view and the decision buttons are
+    // outside the frame, so both are unaffected.
+    function renderHtmlFrame(left) {
+      var d = state.detail;
+      var wrap = el("div", { cls: "iv-htmlframe-wrap" });
+      var src = viewUrl(docId) + "/rendered";
+      if (!isLatest()) {
+        src += "?version=" + encodeURIComponent(state.viewingVersion);
+      }
+      var frame = el("iframe", {
+        cls: "iv-htmlframe",
+        attrs: {
+          src: src,
+          sandbox: "allow-scripts",
+          // The report may fetch outward; don't hand it the review URL (it names the job and build).
+          referrerpolicy: "no-referrer",
+          title: (d.title || d.fileName || "Review document") + " (rendered)",
+        },
+      });
+      wrap.appendChild(frame);
+      left.appendChild(wrap);
+      left.appendChild(
+        el("div", {
+          cls: "iv-note",
+          text:
+            "Rendered in an isolated frame, so its scripts cannot reach Jenkins. Switch to Source to " +
+            "read the markup or to comment on a line.",
+        })
+      );
     }
 
     // Add inline-comment affordances to the rendered markdown. MarkdownRenderer stamps EVERY commentable

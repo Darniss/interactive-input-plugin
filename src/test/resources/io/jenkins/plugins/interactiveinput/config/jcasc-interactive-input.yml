@@ -8,6 +8,7 @@ unclassified:
       dashboardTile: false
       interactiveView: false
       interactiveOutput: true
+      htmlRendering: false
     polling:
       intervalSeconds: 30
     sla:

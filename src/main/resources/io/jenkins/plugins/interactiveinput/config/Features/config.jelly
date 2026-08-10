@@ -58,6 +58,17 @@
     </f:description>
   </f:entry>
 
+  <f:entry>
+    <f:checkbox field="htmlRendering" title="Render HTML review documents" default="true"/>
+    <f:description>
+      Let a reviewer switch an HTML <code>interactiveView</code> document between a rendered view and its
+      source. The document is rendered in a sandboxed frame with a unique opaque origin, so its scripts
+      run (self-contained reports such as a Robot Framework <code>log.html</code> need them) but cannot
+      read this page, your session cookie or a CSRF crumb. Turn this off to keep HTML documents
+      source-only. On by default.
+    </f:description>
+  </f:entry>
+
   <!--
     The "Dashboard tile" (dashboardTile) feature is not implemented yet, so its toggle is intentionally
     not rendered here (hosting review B19: don't expose UI for unavailable features). The field remains

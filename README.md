@@ -142,7 +142,7 @@ A restart mid‑pause is safe: the question is persisted, and the build re‑att
 
 1. **Publish.** The pipeline — or an AI agent — calls `interactiveView(file: 'report.md', …)`, or points it at a folder / glob of dynamically generated files (one review per match). Each file becomes a durable, editable review **copy**; the original on disk is never touched.
 2. **Notice.** The review surfaces on the header bell, the per‑job **Interactive View** page (grouped by report/folder, with *Needs‑approval vs Informational* sections and filters), and the build‑history badge — just like a pending question.
-3. **Review.** A reviewer reads the file (rendered Markdown, or escaped syntax‑highlighted source — never executed), leaves **inline comments** (click the exact heading / paragraph / list item / table row on either view) and general comments, and picks **Approve**, **Request changes**, **Reject**, or **Acknowledge**. `mode: 'info'` makes it a read‑only viewer.
+3. **Review.** A reviewer reads the file (rendered Markdown, a generated HTML report rendered in an isolated frame, or escaped syntax‑highlighted source — never executed in the Jenkins page), leaves **inline comments** (click the exact heading / paragraph / list item / table row on either view) and general comments, and picks **Approve**, **Request changes**, **Reject**, or **Acknowledge**. `mode: 'info'` makes it a read‑only viewer.
 4. **Resume / regenerate.** With `wait: true` the step blocks on the decision and returns it **together with the reviewer's inline comments**, so a generator can regenerate the file from those comments. The generator can then either publish a fresh review or **edit the existing review copy in place** — permitted even after *Request changes* — recording a new version (the editor keeps a **version history**) and posting a **threaded reply** under each reviewer comment (shown with a configurable name such as *AI response*). Without `wait` the publish is non‑blocking.
 
 `interactiveOutput` needs no pause at all — it is a **non‑blocking** post/summary step: it records the build's statistics and renders them as KPI cards + a filterable table on the build page and a trend chart across builds on the job page.
@@ -208,9 +208,19 @@ When this build reaches the step it pauses, the bell lights up for everyone allo
 Publish a generated file for review inside Jenkins — like commenting on a Confluence page. The file's
 content is **snapshotted** into a durable store at step time (so the review survives workspace cleanup);
 Markdown is rendered safely (and **malformed GFM tables — e.g. a delimiter row with fewer cells than the
-header — are repaired** before rendering), while HTML and any programming language are shown as **escaped,
+header — are repaired** before rendering); an **HTML** file can be read either way — a **Rendered** view of
+the report itself or its **Source** — and any programming language is shown as **escaped,
 syntax‑highlighted source** (never executed). Runs inside a `node { }` (it needs a workspace to read the
 file).
+
+An HTML document is rendered in an **isolated frame** (`sandbox="allow-scripts"` with no
+`allow-same-origin`, served under `Content-Security-Policy: sandbox`), so a self‑contained report such as a
+Robot Framework `log.html` — whose content is produced entirely by its own JavaScript — displays properly
+while its scripts sit in a unique opaque origin that cannot read the Jenkins page, your session cookie or a
+CSRF crumb. Because that frame is isolated, the Rendered view is read‑only: **inline line comments live on
+the Source view**, and the decision buttons are outside the frame, so both keep working. Operators who would
+rather not render HTML at all can turn the **Render HTML review documents** feature off under *Manage
+Jenkins → System*, which leaves HTML source‑only as before.
 
 ```groovy
 node {
@@ -539,6 +549,7 @@ Base path: `/interactive-input/api/v1/`. All responses are JSON. Mutating endpoi
 | `GET` | `/views` | Overall/Read | Reviews **you** can read. `?job=<fullName>` ⇒ that job's open, notify‑enabled reviews; `?job=…&build=<n>` ⇒ that build's reviews (any status, for audit); `?all=true` ⇒ every open review (**Overall/Administer**). |
 | `GET` | `/views/{id}` | Item/Read on source job | Full review: metadata, current `content`, `renderedHtml` (Markdown only, with `data-source-line` anchors) and `comments` (each with sanitised `bodyHtml`, plus `parentId`/`authorLabel` when threaded). `404` if missing *or* unreadable. |
 | `GET` | `/views/{id}/raw?version=n` | Item/Read | One content version as `{version, content}` (defaults to the current version). |
+| `GET` | `/views/{id}/rendered?version=n` | Item/Read | An **HTML** document as `text/html` for the review page's isolated frame, served under `Content-Security-Policy: sandbox allow-scripts` (opaque origin). `404` for any other format, or when the *Render HTML review documents* feature is off. |
 | `POST` | `/views/{id}/comments` | Item/Build (or submitter) | Add a comment: `{"body":"…","line":N,"parentId":"…","authorLabel":"…","automated":true}`. Omit `line` (or `-1`) ⇒ general note; `parentId` ⇒ threaded reply (`400` if the parent is missing); `authorLabel`/`automated` set the display name (the audit author stays the caller). |
 | `POST` | `/views/{id}/edit` | Item/Build (or submitter) | Replace the editable copy: `{"content":"…","note":"…"}` (new version + optional history note). Requires `editable:true`; allowed while **OPEN** *or* **CHANGES_REQUESTED**, else `409`. |
 | `POST` | `/views/{id}/decision` | Item/Build (or submitter) | Record a decision: `{"decision": "…"}` where the value is `approve`, `reject`, `acknowledge` or `request-changes`. |
@@ -645,6 +656,7 @@ unclassified:
       dashboardTile: false       # reserved for v0.2
       interactiveView: true      # the interactiveView review step + surfaces
       interactiveOutput: true    # the interactiveOutput statistics step + surfaces
+      htmlRendering: true        # offer a Rendered view for HTML documents (isolated frame)
     polling:
       intervalSeconds: 15        # poll cadence for the bell and per-project widgets (min 5)
     sla:

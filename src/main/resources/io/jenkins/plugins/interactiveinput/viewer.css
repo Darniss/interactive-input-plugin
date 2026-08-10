@@ -223,6 +223,31 @@
   max-width: 100%;
 }
 
+/* ---- rendered HTML snapshot (sandboxed frame) ----
+   An HTML document is shown in an isolated <iframe> rather than inserted into this page (see
+   renderHtmlFrame in viewer.js). A generated report brings its own CSS and expects a tall viewport, so
+   give the frame a generous fixed height with its own scrolling; the border matches .iv-rendered so the
+   two "Rendered" views look alike.
+
+   The literal #fff here is deliberate, not a missed theme variable: this box is a viewport onto a FOREIGN
+   document that ships its own (almost always light) stylesheet, and a browser's default canvas for a
+   document with no background is white. A theme-aware value would put a dark backdrop behind a light
+   report while it loads, or around one that sets no background of its own. Every other surface in this
+   file uses theme variables. */
+.iv-htmlframe-wrap {
+  border: 1px solid var(--input-border, rgba(128, 128, 128, 0.25));
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.iv-htmlframe {
+  display: block;
+  width: 100%;
+  height: min(78vh, 900px);
+  border: 0;
+}
+
 .iv-rendered pre {
   overflow-x: auto;
 }

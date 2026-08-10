@@ -13,7 +13,9 @@ import java.io.ByteArrayOutputStream;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import jenkins.model.Jenkins;
@@ -22,6 +24,7 @@ import net.sf.json.JSONObject;
 import org.htmlunit.HttpMethod;
 import org.htmlunit.WebRequest;
 import org.htmlunit.WebResponse;
+import org.htmlunit.util.NameValuePair;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
@@ -608,6 +611,106 @@ class ViewRestApiTest {
                         .getStatusCode());
     }
 
+    // ---- rendered HTML view: served only for HTML, only when enabled, always sandboxed ----
+
+    /** A self-contained report: all of its content is produced by script, as a Robot log.html is. */
+    private static final String SCRIPTED_REPORT =
+            "<!DOCTYPE html><html><head><style>body{color:red}</style></head>"
+                    + "<body><div id=\"c\"></div><script>document.getElementById('c').textContent='hi'</script>"
+                    + "</body></html>";
+
+    @Test
+    void renderedServesHtmlVerbatimUnderASandboxCsp(JenkinsRule j) throws Exception {
+        secure(j);
+        seedFormatted("h1", "log.html", ReviewDocument.FORMAT_HTML, SCRIPTED_REPORT);
+
+        WebResponse resp = get(j.createWebClient().login("builder"), j, BASE + "views/h1/rendered");
+        assertEquals(200, resp.getStatusCode());
+        assertTrue(resp.getContentType().contains("text/html"), "must render as HTML: " + resp.getContentType());
+        // A browser enforces EVERY CSP header it receives, so core's page policy (script-src 'self') must
+        // have been REPLACED rather than appended — otherwise the report's inline scripts are blocked and
+        // the rendered view is blank. Assert there is exactly one, and that it is ours.
+        List<String> csps = resp.getResponseHeaders().stream()
+                .filter(h -> "Content-Security-Policy".equalsIgnoreCase(h.getName()))
+                .map(NameValuePair::getValue)
+                .collect(Collectors.toList());
+        assertEquals(1, csps.size(), () -> "exactly one CSP header must survive, got: " + csps);
+        String csp = csps.get(0);
+        assertTrue(csp.contains("sandbox"), "must carry a sandbox CSP: " + csp);
+        assertTrue(csp.contains("allow-scripts"), "a scripted report needs allow-scripts: " + csp);
+        assertFalse(
+                csp.contains("allow-same-origin"),
+                "allow-same-origin would let the document reach this Jenkins session: " + csp);
+        assertFalse(csp.contains("script-src"), "a script-src restriction would blank a generated report: " + csp);
+        assertEquals("nosniff", resp.getResponseHeaderValue("X-Content-Type-Options"));
+        // Served verbatim — sanitising the scripts away is exactly what left a generated report blank.
+        assertEquals(SCRIPTED_REPORT, resp.getContentAsString(), "the snapshot is served unmodified");
+    }
+
+    @Test
+    void renderedIsGatedByItemReadAndHidesExistence(JenkinsRule j) throws Exception {
+        secure(j);
+        seedFormatted("h1", "log.html", ReviewDocument.FORMAT_HTML, SCRIPTED_REPORT);
+
+        // Item.READ is sufficient — rendering is a read, not a contribution.
+        assertEquals(
+                200,
+                get(j.createWebClient().login("reader"), j, BASE + "views/h1/rendered")
+                        .getStatusCode());
+        assertEquals(
+                404, get(j.createWebClient(), j, BASE + "views/h1/rendered").getStatusCode());
+        assertEquals(
+                404,
+                get(j.createWebClient().login("builder"), j, BASE + "views/nope/rendered")
+                        .getStatusCode());
+    }
+
+    @Test
+    void renderedRefusesANonHtmlDocument(JenkinsRule j) throws Exception {
+        secure(j);
+        // Guard against the endpoint becoming a general "serve anything as text/html" hole: a markdown
+        // document has its own safe render path and must never be served through here.
+        seedFormatted("m1", "notes.md", ReviewDocument.FORMAT_MARKDOWN, "# Title\n\n<script>alert(1)</script>");
+
+        assertEquals(
+                404,
+                get(j.createWebClient().login("builder"), j, BASE + "views/m1/rendered")
+                        .getStatusCode());
+        assertFalse(
+                json(get(j.createWebClient().login("builder"), j, BASE + "views/m1"))
+                        .getBoolean("htmlRenderable"),
+                "a markdown document must not advertise the sandboxed HTML view");
+    }
+
+    @Test
+    void renderedIsUnavailableWhenHtmlRenderingIsOff(JenkinsRule j) throws Exception {
+        secure(j);
+        seedFormatted("h1", "log.html", ReviewDocument.FORMAT_HTML, SCRIPTED_REPORT);
+        InteractiveInputGlobalConfig.get().getFeatures().setHtmlRendering(false);
+
+        assertEquals(
+                404,
+                get(j.createWebClient().login("builder"), j, BASE + "views/h1/rendered")
+                        .getStatusCode(),
+                "with the feature off an HTML snapshot stays source-only");
+        assertFalse(
+                json(get(j.createWebClient().login("builder"), j, BASE + "views/h1"))
+                        .getBoolean("htmlRenderable"),
+                "the client must not offer a Rendered view the server will refuse");
+    }
+
+    @Test
+    void detailAdvertisesTheRenderedViewForAnHtmlSnapshot(JenkinsRule j) throws Exception {
+        secure(j);
+        seedFormatted("h1", "log.html", ReviewDocument.FORMAT_HTML, SCRIPTED_REPORT);
+
+        JSONObject body = json(get(j.createWebClient().login("builder"), j, BASE + "views/h1"));
+        assertTrue(body.getBoolean("htmlRenderable"), "an HTML snapshot offers the sandboxed Rendered view");
+        // The content still travels as raw text for the Source view, and is never pre-rendered into the page.
+        assertEquals(SCRIPTED_REPORT, body.getString("content"));
+        assertFalse(body.has("renderedHtml"), "HTML must never be inlined as renderedHtml");
+    }
+
     // ---- helpers ----
 
     private static void secure(JenkinsRule j) throws Exception {
@@ -665,6 +768,30 @@ class ViewRestApiTest {
                 null,
                 0L,
                 groupId,
+                null);
+        return ViewStore.get().submit(doc, content);
+    }
+
+    /** Seed a document with an explicit file name AND format (for the rendered-HTML tests). */
+    private static ReviewDocument seedFormatted(String id, String fileName, String format, String content) {
+        ReviewDocument doc = new ReviewDocument(
+                id,
+                JOB,
+                1,
+                "Report",
+                "Title",
+                fileName,
+                format,
+                "markup",
+                "tester",
+                System.currentTimeMillis(),
+                true,
+                false,
+                true,
+                false,
+                null,
+                0L,
+                null,
                 null);
         return ViewStore.get().submit(doc, content);
     }

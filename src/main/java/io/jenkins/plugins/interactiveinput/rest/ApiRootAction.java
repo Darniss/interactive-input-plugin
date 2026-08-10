@@ -72,6 +72,7 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
  *   GET  /interactive-input/api/v1/views                   -&gt; Views#doIndex             (Overall/Read; ?all=true =&gt; Administer)
  *   GET  /interactive-input/api/v1/views/{id}              -&gt; ViewEndpoint#doIndex      (Item.READ, else 404)
  *   GET  /interactive-input/api/v1/views/{id}/raw          -&gt; ViewEndpoint#doRaw        (Item.READ, else 404)
+ *   GET  /interactive-input/api/v1/views/{id}/rendered     -&gt; ViewEndpoint#doRendered   (Item.READ + HTML + flag, else 404)
  *   GET  /interactive-input/api/v1/views/{id}/download     -&gt; ViewEndpoint#doDownload   (Item.READ, else 404)
  *   GET  /interactive-input/api/v1/views/{id}/downloadGroup -&gt; ViewEndpoint#doDownloadGroup (Item.READ, else 404)
  *   POST /interactive-input/api/v1/views/{id}/comments     -&gt; ViewEndpoint#doComments   (Item.BUILD/submitter, else 403)
@@ -131,6 +132,17 @@ public class ApiRootAction implements UnprotectedRootAction {
         return InteractiveInputGlobalConfig.featuresOrDefault().isInteractiveView()
                 ? null
                 : JsonHttpResponse.error(404, "interactiveView is disabled");
+    }
+
+    /**
+     * @return {@code true} if this document may be served for rendering: the {@code htmlRendering}
+     *     feature is on and the snapshot is HTML. Every other format already has a safe path (markdown
+     *     through {@link MarkdownRenderer}, everything else as escaped source), so it never needs the
+     *     sandboxed frame.
+     */
+    static boolean htmlRenderable(@NonNull ReviewDocument doc) {
+        return InteractiveInputGlobalConfig.featuresOrDefault().isHtmlRendering()
+                && ReviewDocument.FORMAT_HTML.equals(doc.getFormat());
     }
 
     @NonNull
@@ -614,14 +626,59 @@ public class ApiRootAction implements UnprotectedRootAction {
             return new JsonHttpResponse(200, o);
         }
 
-        /**
-         * GET /views/{id}/download — the current version's content as a file attachment.
-         *
-         * <p>Read-only (no CSRF needed) and permission-checked exactly like {@link #doIndex()}:
-         * {@code Item.READ} via {@link ViewStore#canView}, else 404 (no existence leak). The download name
-         * is the snapshot's basename, further sanitised by {@link DownloadHttpResponse}.
-         */
-        public HttpResponse doDownload() {
+    /**
+     * GET /views/{id}/rendered?version=n — the snapshot as {@code text/html} for display inside the
+     * review page's sandboxed frame ("Rendered" view), so a generated report is readable as a report
+     * rather than as escaped source.
+     *
+     * <p>Read-only (no CSRF needed) and permission-checked exactly like {@link #doRaw}:
+     * {@code Item.READ} via {@link ViewStore#canView}, else 404 (no existence leak). Two further gates
+     * keep this from becoming a general "serve arbitrary HTML from Jenkins" endpoint: it 404s unless the
+     * {@code htmlRendering} feature is on, and unless the document really is an HTML snapshot
+     * ({@link ApiRootAction#htmlRenderable}) — a markdown or code document is never served this way.
+     *
+     * <p>The bytes are untrusted, so the isolation lives entirely in the response headers — see
+     * {@link SandboxedHtmlResponse}, which serves them under {@code Content-Security-Policy: sandbox
+     * allow-scripts} (an opaque origin that cannot touch this Jenkins session, even if the URL is opened
+     * directly).
+     */
+    public HttpResponse doRendered(StaplerRequest2 req) {
+        HttpResponse disabled = viewsDisabledOrNull();
+        if (disabled != null) {
+            return disabled;
+        }
+        ViewStore store = ViewStore.get();
+        ReviewDocument doc = store.get(id);
+        if (doc == null || !store.canView(doc) || !htmlRenderable(doc)) {
+            return JsonHttpResponse.error(404, "No such renderable review: " + id);
+        }
+        int version = doc.getCurrentVersion();
+        String v = req.getParameter("version");
+        if (v != null && !v.isEmpty()) {
+            try {
+                version = Integer.parseInt(v.trim());
+            } catch (NumberFormatException e) {
+                return JsonHttpResponse.error(400, "version must be an integer");
+            }
+            if (version < 1 || version > doc.getCurrentVersion()) {
+                return JsonHttpResponse.error(404, "No such version: " + version);
+            }
+        }
+        String content = store.readContent(id, version);
+        if (content == null) {
+            return JsonHttpResponse.error(404, "No content for review: " + id);
+        }
+        return new SandboxedHtmlResponse(content);
+    }
+
+    /**
+     * GET /views/{id}/download — the current version's content as a file attachment.
+     *
+     * <p>Read-only (no CSRF needed) and permission-checked exactly like {@link #doIndex()}:
+     * {@code Item.READ} via {@link ViewStore#canView}, else 404 (no existence leak). The download name
+     * is the snapshot's basename, further sanitised by {@link DownloadHttpResponse}.
+     */
+    public HttpResponse doDownload() {
             HttpResponse disabled = viewsDisabledOrNull();
             if (disabled != null) {
                 return disabled;
@@ -999,6 +1056,10 @@ public class ApiRootAction implements UnprotectedRootAction {
                 o.put("renderedHtml", MarkdownRenderer.renderWithSourceLines(content == null ? "" : content));
             }
         }
+        // An HTML snapshot is never inlined as renderedHtml (sanitising it away would leave a generated
+        // report blank). Instead the client is told it may offer the "Rendered" view and loads it from
+        // /rendered into a sandboxed frame — see doRendered.
+        o.put("htmlRenderable", htmlRenderable(doc));
         return o;
     }
 

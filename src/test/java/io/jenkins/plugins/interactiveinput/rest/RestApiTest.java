@@ -9,6 +9,9 @@ import hudson.model.FreeStyleProject;
 import hudson.model.Item;
 import hudson.model.ParameterDefinition;
 import hudson.model.StringParameterDefinition;
+import hudson.model.User;
+import hudson.security.ACL;
+import hudson.security.ACLContext;
 import io.jenkins.plugins.interactiveinput.config.InteractiveInputGlobalConfig;
 import io.jenkins.plugins.interactiveinput.model.Choice;
 import io.jenkins.plugins.interactiveinput.model.Question;
@@ -328,47 +331,59 @@ class RestApiTest {
         // A real build must exist so the server can resolve the native input page URL (B27).
         j.buildAndAssertSuccess(j.jenkins.getItemByFullName(JOB, FreeStyleProject.class));
 
+        // These two mirrors are asserted through questionJson directly rather than over HTTP. A mirror
+        // created by hand has no live native input behind it, and the SLA ticker reconciles the bridge
+        // every 30s (SlaTicker -> InputStepBridge.sync -> dropBridged), so a mirror can legitimately be
+        // reaped between submit() and an HTTP GET — which made this test fail intermittently with
+        // "404 No such question". Asserting the JSON the endpoint would serve, from the Question itself,
+        // tests exactly the same contract without racing a background reaper; the HTTP transport and its
+        // permission/404 behaviour are covered by the other tests in this class.
+        Question paramInput = new Question(
+                "qparam",
+                "Need params",
+                null,
+                false,
+                0L,
+                "params needed",
+                null,
+                JOB,
+                1,
+                "tester",
+                System.currentTimeMillis(),
+                true);
         // A bridged native input WITH parameters is mirrored with no choices and no free text — the
         // modal cannot answer it, so questionJson must hand the client the build's input page URL.
-        QuestionStore.get()
-                .submit(new Question(
-                        "qparam",
-                        "Need params",
-                        null,
-                        false,
-                        0L,
-                        "params needed",
-                        null,
-                        JOB,
-                        1,
-                        "tester",
-                        System.currentTimeMillis(),
-                        true));
-        JSONObject qParam = json(get(j.createWebClient().login("builder"), j, BASE + "questions/qparam"));
+        JSONObject qParam = asUser("builder", () -> ApiRootAction.questionJson(paramInput, true));
         assertTrue(qParam.getJSONArray("choices").isEmpty(), "a parameterized bridged input has no choices");
         assertTrue(qParam.has("forwardUrl"), "the modal needs a forward URL to the input page: " + qParam);
         assertTrue(qParam.getString("forwardUrl").endsWith("/input/"), qParam.getString("forwardUrl"));
 
         // A bridged input that CAN be answered in-modal (a proceed choice) must NOT get a forward URL.
-        QuestionStore.get()
-                .submit(new Question(
-                        "qproceed",
-                        "Proceed?",
-                        List.of(new Choice("__proceed__", "Approve / Proceed")),
-                        false,
-                        0L,
-                        null,
-                        null,
-                        JOB,
-                        1,
-                        "tester",
-                        System.currentTimeMillis(),
-                        true));
-        JSONObject qProceed = json(get(j.createWebClient().login("builder"), j, BASE + "questions/qproceed"));
+        Question proceedInput = new Question(
+                "qproceed",
+                "Proceed?",
+                List.of(new Choice("__proceed__", "Approve / Proceed")),
+                false,
+                0L,
+                null,
+                null,
+                JOB,
+                1,
+                "tester",
+                System.currentTimeMillis(),
+                true);
+        JSONObject qProceed = asUser("builder", () -> ApiRootAction.questionJson(proceedInput, true));
         assertFalse(qProceed.has("forwardUrl"), "an answerable bridged input needs no forward URL");
     }
 
     // ---- helpers ----
+
+    /** Evaluate {@code body} as {@code userId}, so a server-side call sees the same identity a request would. */
+    private static <T> T asUser(String userId, java.util.function.Supplier<T> body) {
+        try (ACLContext ignored = ACL.as2(User.getById(userId, true).impersonate2())) {
+            return body.get();
+        }
+    }
 
     private static void secure(JenkinsRule j) throws Exception {
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());

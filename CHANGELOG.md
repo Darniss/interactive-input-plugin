@@ -7,6 +7,25 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Interactive View can now render an HTML document, not just show its source.** An HTML review offers a
+  **Rendered / Source** toggle (Rendered first); every other format is unchanged. Reported for a Robot
+  Framework `log.html`, which previously read as 542 KB of escaped markup. Sanitising such a file into the
+  page is not an option — its entire content is produced by its own JavaScript, so an allowlist sanitiser
+  leaves only its *"Opening Robot Framework log failed / JavaScript disabled"* notice — so the document is
+  **isolated instead of sanitised**: a new read-only `GET /views/{id}/rendered?version=n` serves it as
+  `text/html` under `Content-Security-Policy: sandbox allow-scripts; base-uri 'none'; form-action 'none';
+  frame-ancestors 'self'` (new `SandboxedHtmlResponse`), and the viewer displays it in an
+  `<iframe sandbox="allow-scripts">`. Withholding `allow-same-origin` is the boundary: the report gets a
+  unique **opaque** origin, so its scripts run but cannot read the Jenkins page, the session cookie,
+  `localStorage` or a CSRF crumb; `allow-forms` / `allow-popups` / `allow-top-navigation` are withheld too.
+  The policy is sent as a **header** as well as a frame attribute, so opening the URL directly is equally
+  contained, and it *replaces* (never appends to) core's page CSP — a browser enforces every CSP header it
+  receives, and core's `script-src 'self'` would otherwise have silently blanked the report. The endpoint is
+  `Item.READ`-gated (404 no-leak), refuses any non-HTML document, and is gated by a new
+  **htmlRendering** feature flag (*Manage Jenkins → System*, JCasC
+  `unclassified.interactiveInput.features.htmlRendering`, default on) that returns HTML to source-only when
+  off. Because the frame is isolated, the Rendered view is read-only: inline line comments stay on the
+  Source view, and the decision buttons sit outside the frame, so both are unaffected.
 - **Interactive View file & folder downloads.** The review editor can now download the file being viewed
   and — for a multi-file group (a glob/`dir` publish) — every file in the group as a single ZIP. Two new
   read-only REST endpoints back it: `GET /views/{id}/download` (the current version's content as an

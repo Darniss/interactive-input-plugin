@@ -34,6 +34,13 @@ public class Features extends AbstractDescribableImpl<Features> {
     private Boolean interactiveView = Boolean.TRUE;
     private Boolean interactiveOutput = Boolean.TRUE;
 
+    /**
+     * Whether an {@code interactiveView} HTML snapshot can be <em>rendered</em> (in a sandboxed frame)
+     * instead of only shown as escaped source. Same nullable-Boolean upgrade handling as the two flags
+     * above: absent from an older persisted config means default-on.
+     */
+    private Boolean htmlRendering = Boolean.TRUE;
+
     @DataBoundConstructor
     public Features() {
         // Defaults set via field initialisers; JCasC/Stapler apply overrides through setters.
@@ -108,6 +115,21 @@ public class Features extends AbstractDescribableImpl<Features> {
     @DataBoundSetter
     public void setInteractiveOutput(boolean interactiveOutput) {
         this.interactiveOutput = interactiveOutput;
+    }
+
+    /**
+     * @return whether an HTML review snapshot may be rendered in a sandboxed frame (the review page's
+     *     "Rendered" view) as well as shown as escaped source. Turning this off leaves HTML documents
+     *     source-only, which is how the plugin behaved before the feature existed. A {@code null} field
+     *     (upgrade from a config saved before this flag existed) defaults on.
+     */
+    public boolean isHtmlRendering() {
+        return htmlRendering == null || htmlRendering;
+    }
+
+    @DataBoundSetter
+    public void setHtmlRendering(boolean htmlRendering) {
+        this.htmlRendering = htmlRendering;
     }
 
     @Extension

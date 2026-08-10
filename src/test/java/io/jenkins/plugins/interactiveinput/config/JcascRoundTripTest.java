@@ -37,6 +37,7 @@ class JcascRoundTripTest {
         assertFalse(f.isDashboardTile());
         assertFalse(f.isInteractiveView(), "interactiveView overridden to false in YAML");
         assertTrue(f.isInteractiveOutput(), "interactiveOutput stays on (default) in YAML");
+        assertFalse(f.isHtmlRendering(), "htmlRendering overridden to false in YAML");
         assertEquals(30, cfg.getPolling().getIntervalSeconds());
         assertEquals(5, cfg.getSla().getDefaultMinutes());
         assertEquals(14, cfg.getRetentionDays());
@@ -69,6 +70,9 @@ class JcascRoundTripTest {
         assertTrue(
                 exported.contains("interactiveView: false"),
                 () -> "export missing interactiveView feature flag:\n" + exported);
+        assertTrue(
+                exported.contains("htmlRendering: false"),
+                () -> "export missing htmlRendering feature flag:\n" + exported);
         assertTrue(exported.contains("intervalSeconds: 30"), () -> "export missing polling:\n" + exported);
         assertTrue(
                 exported.contains("lockToBuildStarter: true"),
