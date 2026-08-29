@@ -463,6 +463,23 @@ All notable changes to this project are documented here. The format follows
   (`bell.js` could also duplicate its label text). All new UI uses design-system classes / theme variables
   and renders correctly in both classic and experimental layouts, light and dark.
 
+### Security
+- **Addressed the Jenkins Security Scan findings from hosting request review (#5166, reported by
+  Kevin-CB).** Four findings against `ApiRootAction`, all in read-only `GET` endpoints:
+  - `V1#doHealth` no longer discloses the instance-wide pending-question count to anonymous or
+    unprivileged callers. The endpoint stays reachable without a permission check (it is an intentional,
+    unauthenticated liveness probe for load balancers/uptime monitors that cannot present credentials,
+    documented at `GET /interactive-input/api/v1/health`), but `pending` is now only populated when the
+    caller already has `Jenkins.READ` — the same instance-wide count a `Jenkins.READ` holder could already
+    obtain from `Questions#doIndex`. An anonymous or unprivileged caller now only ever learns liveness
+    (`status: ok`).
+  - `V1#doHealth`, `Questions#doIndex` and `QuestionEndpoint#doIndex` were flagged for a missing
+    `@POST`/`@RequirePOST` (CSRF) annotation. All three are side-effect-free reads that are already
+    permission-checked in-method (`Jenkins.READ`, or `QuestionStore#canView`) — confirmed false positives
+    per the [Jenkins CodeQL guidance](https://github.com/jenkins-infra/jenkins-codeql/blob/main/src/WebMethodMissingPostAnnotation.md).
+    Each now carries an explicit `@GET` annotation (Stapler-enforced GET-only, defense in depth beyond
+    just silencing the scanner) plus an `lgtm[jenkins/csrf]` suppression with an inline explanation.
+
 ### Notes / trade-offs
 - The durable audit record is the build console line; the per-build audit *page* is a live view of the
   store and shows an empty state after retention compaction.

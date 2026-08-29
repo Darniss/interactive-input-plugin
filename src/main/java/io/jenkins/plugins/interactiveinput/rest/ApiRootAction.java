@@ -52,6 +52,7 @@ import net.sf.json.JSONObject;
 import org.kohsuke.stapler.HttpResponse;
 import org.kohsuke.stapler.StaplerRequest2;
 import org.kohsuke.stapler.interceptor.RequirePOST;
+import org.kohsuke.stapler.verb.GET;
 
 /**
  * Versioned JSON REST API rooted at {@code /interactive-input/api/v1/} (§6.3, §8.6).
@@ -273,7 +274,18 @@ public class ApiRootAction implements UnprotectedRootAction {
             return new Views();
         }
 
-        /** GET /health — anonymous liveness probe. */
+        /**
+         * GET /health — anonymous liveness probe (Jenkins Security Scan follow-up on #5166): consumed
+         * by load balancers / uptime monitors that cannot present credentials, so it is intentionally
+         * reachable without a permission check, and read-only with no side effects, so a CSRF token is
+         * not applicable. {@code pending} is only populated for callers who already have
+         * {@code Jenkins.READ} (the same instance-wide count {@link Questions#doIndex} would already
+         * disclose to them via {@code ?all=true}, at {@code Overall/Administer}, or scoped per-job
+         * without extra permission) — an anonymous or otherwise unprivileged caller only ever learns
+         * liveness ({@code status: ok}), never operational counts.
+         */
+        // lgtm[jenkins/csrf] -- read-only, no side effects; nothing here to protect with a CSRF token
+        @GET
         public HttpResponse doHealth() {
             HttpResponse disabled = apiDisabledOrNull();
             if (disabled != null) {
@@ -281,7 +293,9 @@ public class ApiRootAction implements UnprotectedRootAction {
             }
             JSONObject o = new JSONObject();
             o.put("status", "ok");
-            o.put("pending", QuestionStore.get().listAll().size());
+            if (Jenkins.get().hasPermission(Jenkins.READ)) {
+                o.put("pending", QuestionStore.get().listAll().size());
+            }
             return new JsonHttpResponse(200, o);
         }
 
@@ -319,6 +333,8 @@ public class ApiRootAction implements UnprotectedRootAction {
          *   <li>default — every WAITING question the caller may answer, across all jobs.</li>
          * </ul>
          */
+        // lgtm[jenkins/csrf] -- read-only listing, no side effects; already permission-checked below
+        @GET
         public HttpResponse doIndex(StaplerRequest2 req) {
             HttpResponse disabled = apiDisabledOrNull();
             if (disabled != null) {
@@ -395,6 +411,8 @@ public class ApiRootAction implements UnprotectedRootAction {
         }
 
         /** GET /questions/{id} — detail. 404 if not found or not readable (avoids existence leak). */
+        // lgtm[jenkins/csrf] -- read-only, no side effects; store.canView(q) below is the permission check
+        @GET
         public HttpResponse doIndex() {
             HttpResponse disabled = apiDisabledOrNull();
             if (disabled != null) {
