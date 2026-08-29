@@ -1,6 +1,6 @@
-# Contributing to Interactive Input
+# Contributing to Interactive CI
 
-Thanks for your interest in improving Interactive Input! This guide covers local setup, standards,
+Thanks for your interest in improving Interactive CI! This guide covers local setup, standards,
 and the pull-request flow.
 
 ## Prerequisites

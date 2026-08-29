@@ -74,7 +74,7 @@ public class InteractiveInputAppearanceConfig extends GlobalConfiguration {
 
     /**
      * Icon stems shipped by this plugin (SVGs under {@code src/main/resources/images/symbols/}) rather
-     * than sourced from ionicons-api. These render as {@code symbol-<stem> plugin-interactive-input}
+     * than sourced from ionicons-api. These render as {@code symbol-<stem> plugin-interactive-ci}
      * (no {@code -outline} suffix, which is an Ionicons-only convention).
      */
     private static final List<String> CUSTOM_SYMBOLS = List.of("robot");
@@ -191,7 +191,7 @@ public class InteractiveInputAppearanceConfig extends GlobalConfiguration {
     /**
      * @param iconStem an icon stem (validated against {@link #ICON_CHOICES}; unknown values fall back to
      *     {@link #DEFAULT_ICON})
-     * @return the Jenkins symbol class rendered as an SVG: {@code symbol-<name> plugin-interactive-input}
+     * @return the Jenkins symbol class rendered as an SVG: {@code symbol-<name> plugin-interactive-ci}
      *     for plugin-shipped symbols ({@link #CUSTOM_SYMBOLS}), otherwise
      *     {@code symbol-<name>-outline plugin-ionicons-api}
      */
@@ -199,7 +199,7 @@ public class InteractiveInputAppearanceConfig extends GlobalConfiguration {
     public static String iconClassName(@CheckForNull String iconStem) {
         String stem = iconStem != null && ICON_CHOICES.contains(iconStem) ? iconStem : DEFAULT_ICON;
         if (CUSTOM_SYMBOLS.contains(stem)) {
-            return "symbol-" + stem + " plugin-interactive-input";
+            return "symbol-" + stem + " plugin-interactive-ci";
         }
         return "symbol-" + stem + "-outline plugin-ionicons-api";
     }

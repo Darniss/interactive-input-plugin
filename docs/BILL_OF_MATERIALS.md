@@ -1,6 +1,6 @@
 # Bill of Materials (BOM)
 
-Software Bill of Materials for the **Interactive Input** Jenkins plugin. It records the exact
+Software Bill of Materials for the **Interactive CI** Jenkins plugin. It records the exact
 components that make up the artifact and the toolchain used to build it, so the build is auditable
 and reproducible.
 
@@ -15,16 +15,16 @@ and reproducible.
 | Field | Value |
 |---|---|
 | Group ID | `io.jenkins.plugins` |
-| Artifact ID | `interactive-input` |
+| Artifact ID | `interactive-ci` |
 | Version | `${changelist}` → `999999-SNAPSHOT` for local/dev builds (CD assigns the release version via JEP-305 incrementals) |
 | Packaging | `hpi` (Jenkins plugin) |
-| Artifact | `target/interactive-input.hpi` |
+| Artifact | `target/interactive-ci.hpi` |
 | Size | 116,613 bytes |
 | SHA-256 | `d0382e160127ef73e1528f2cf636d55aea4da0c78f79fa3c6e1b807c2d17ab64` |
 | License | MIT |
 
 > The SHA-256 and size above are for the build produced on 2026-07-22; they change on every rebuild.
-> Recompute with `sha256sum target/interactive-input.hpi`.
+> Recompute with `sha256sum target/interactive-ci.hpi`.
 
 ---
 
@@ -141,7 +141,7 @@ Used to compile/run the JUnit 5 suite; excluded from the HPI.
 | **EPL / LGPL** | Test-only (JUnit) and build-only (SpotBugs annotations) components. |
 
 **Nothing third-party is bundled into the distributed HPI.** `WEB-INF/lib` contains only the plugin's
-own `interactive-input.jar` (MIT); every runtime library — including `commonmark` — is contributed by
+own `interactive-ci.jar` (MIT); every runtime library — including `commonmark` — is contributed by
 Jenkins core or by a separately-installed plugin dependency. No copyleft (GPL) code is bundled, and the
 distribution is compatible with redistribution on the Jenkins Update Center.
 
@@ -160,10 +160,10 @@ mvn -B -ntp dependency:tree -DoutputFile=deptree.txt
 mvn -B -ntp help:effective-pom -Doutput=epom.xml
 
 # Artifact hash + size
-sha256sum target/interactive-input.hpi && stat -c '%s bytes' target/interactive-input.hpi
+sha256sum target/interactive-ci.hpi && stat -c '%s bytes' target/interactive-ci.hpi
 
 # What is actually bundled in the HPI
-unzip -l target/interactive-input.hpi 'WEB-INF/lib/*'
+unzip -l target/interactive-ci.hpi 'WEB-INF/lib/*'
 
 # (Optional) CycloneDX machine-readable SBOM
 mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom

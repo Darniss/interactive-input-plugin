@@ -98,8 +98,8 @@ class InteractiveInputAppearanceConfigTest {
                 "symbol-sparkles-outline plugin-ionicons-api",
                 InteractiveInputAppearanceConfig.iconClassName("sparkles"));
         // Ionicons has no robot glyph, so the robot is a symbol this plugin ships itself: no -outline
-        // suffix and the plugin-interactive-input source rather than plugin-ionicons-api.
-        assertEquals("symbol-robot plugin-interactive-input", InteractiveInputAppearanceConfig.iconClassName("robot"));
+        // suffix and the plugin-interactive-ci source rather than plugin-ionicons-api.
+        assertEquals("symbol-robot plugin-interactive-ci", InteractiveInputAppearanceConfig.iconClassName("robot"));
         // Unknown stems fall back to the default so we never emit a class for a missing symbol.
         assertEquals(
                 "symbol-" + InteractiveInputAppearanceConfig.DEFAULT_ICON + "-outline plugin-ionicons-api",
@@ -108,12 +108,12 @@ class InteractiveInputAppearanceConfigTest {
 
     @Test
     void robotSymbolResolvesFromThisPlugin(JenkinsRule j) {
-        // Proves the whole chain for the bundled icon: the "symbol-robot plugin-interactive-input" class
+        // Proves the whole chain for the bundled icon: the "symbol-robot plugin-interactive-ci" class
         // (from iconClassName) actually resolves to src/main/resources/images/symbols/robot.svg. A missing
         // symbol would resolve to a placeholder that lacks our distinctive path data.
         String svg = Symbol.get(new SymbolRequest.Builder()
                 .withName("robot")
-                .withPluginName("interactive-input")
+                .withPluginName("interactive-ci")
                 .build());
         assertNotNull(svg);
         assertTrue(svg.contains("<svg"), "robot symbol must resolve to an inlined SVG");

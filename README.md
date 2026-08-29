@@ -1,4 +1,4 @@
-# Interactive Input
+# Interactive CI
 
 > A notification bell and a rich human‑in‑the‑loop (HITL) modal for Jenkins pipelines that pause for a human decision — plus a language‑agnostic REST API so any external agent (a bot, a script, an AI copilot) can answer on a human's behalf.
 
@@ -13,7 +13,7 @@
 ## Table of contents
 
 - [Why this plugin exists](#why-this-plugin-exists)
-- [`input` vs `interactive-input`](#input-vs-interactive-input)
+- [`input` vs `interactive-ci`](#input-vs-interactive-ci)
 - [Features](#features)
 - [How it works](#how-it-works)
 - [Quick start](#quick-start)
@@ -43,15 +43,15 @@ Jenkins has shipped a pipeline `input` step for years. It works, but it has thre
 2. **The approval surface is minimal.** The built‑in prompt is a message, an OK button, and optional form parameters. There is no place for rich context (release notes, a diff, a risk summary), no notion of *why* each choice exists, and no first‑class way for an **external agent** to answer programmatically with a clean, versioned contract.
 3. **There is nowhere to review a generated artifact or see a build's results in context.** When a pipeline — or an AI agent — produces a file (a design doc, a Terraform plan, release notes, a PR), there is no in‑Jenkins way to review it line by line, leave comments, and feed those comments back for regeneration; and per‑build metrics (cost, resource usage, carbon footprint) live only in the log, with no cards or trend across builds.
 
-`interactive-input` closes all three gaps **without changing anything about how your existing pipelines behave**. It adds a notification bell, a rich modal, a durable `askInteractive` step, a Confluence‑style file‑review surface (`interactiveView`) with a comment‑and‑regenerate loop, a per‑build statistics surface (`interactiveOutput`), and a REST API — all opt‑in, all governed by the same permission model Jenkins already enforces on `input`.
+`interactive-ci` closes all three gaps **without changing anything about how your existing pipelines behave**. It adds a notification bell, a rich modal, a durable `askInteractive` step, a Confluence‑style file‑review surface (`interactiveView`) with a comment‑and‑regenerate loop, a per‑build statistics surface (`interactiveOutput`), and a REST API — all opt‑in, all governed by the same permission model Jenkins already enforces on `input`.
 
 ---
 
-## `input` vs `interactive-input`
+## `input` vs `interactive-ci`
 
 Both pause a pipeline and wait for a human. Here is what changes:
 
-| Capability | Built‑in `input` | `interactive-input` |
+| Capability | Built‑in `input` | `interactive-ci` |
 |---|---|---|
 | Pause a pipeline for a human decision | ✅ | ✅ (`askInteractive`) |
 | **Per‑project notification centre** | ❌ | ✅ job‑page box + page, build‑history "awaiting input" badge, per‑build audit view |
@@ -70,7 +70,7 @@ Both pause a pipeline and wait for a human. Here is what changes:
 | Permission model | Item.BUILD / submitter | ✅ **identical** (mirrors `pipeline-input-step`) |
 | Runtime AI dependency | n/a | ❌ none — the API is generic HITL plumbing |
 
-**TL;DR** — `interactive-input` is a *superset UX and an integration surface* on top of the same durable, permission‑checked foundation as `input`. You can adopt it incrementally: flip on the bridge to light up existing inputs, or write new `askInteractive` steps when you want the richer surface.
+**TL;DR** — `interactive-ci` is a *superset UX and an integration surface* on top of the same durable, permission‑checked foundation as `input`. You can adopt it incrementally: flip on the bridge to light up existing inputs, or write new `askInteractive` steps when you want the richer surface.
 
 ---
 
@@ -704,7 +704,7 @@ See [`docs/SECURITY.md`](docs/SECURITY.md) for the threat model and how to repor
 
 **Which programming languages are supported?** Two different things are involved, so it helps to split them:
 
-- ✅ **Answering a question — any language.** The bell, modal, REST API, and bridge only speak **HTTP + JSON**. So the program that answers (your app under test, your deploy tool, your AI agent) can be written in **any** language that has an HTTP client: **Python, JavaScript / TypeScript (Node), Java / Kotlin, Go, Rust, C# / .NET, Ruby, PHP, or Bash + `curl`**. This is what makes `interactive-input` a general "wait for a human" point, not a Groovy‑only feature.
+- ✅ **Answering a question — any language.** The bell, modal, REST API, and bridge only speak **HTTP + JSON**. So the program that answers (your app under test, your deploy tool, your AI agent) can be written in **any** language that has an HTTP client: **Python, JavaScript / TypeScript (Node), Java / Kotlin, Go, Rust, C# / .NET, Ruby, PHP, or Bash + `curl`**. This is what makes `interactive-ci` a general "wait for a human" point, not a Groovy‑only feature.
 - ⚠️ **Declaring the pause — Jenkins Pipeline (Groovy).** Like every Jenkins step, `askInteractive` is called from a `Jenkinsfile` (Groovy). You do **not** rewrite your app in Groovy — your program, in any language, takes part by (a) being run by that pipeline and/or (b) answering through the REST API. The pipeline is only the place where the pause is declared.
 - ➡️ **Already have native `input` steps in other pipelines?** Turn on `inputStepBridge` and they show up in the bell with **no code changes**.
 
@@ -740,7 +740,7 @@ Full dependency inventory: [`docs/BILL_OF_MATERIALS.md`](docs/BILL_OF_MATERIALS.
 ```bash
 # Requires JDK 21+ and Maven 3.8.6+
 mvn -B -ntp clean verify      # runs the full test suite + SpotBugs
-ls target/interactive-input.hpi
+ls target/interactive-ci.hpi
 ```
 
 Behind a corporate proxy, configure `~/.m2/settings.xml` and point Maven at `https://repo.jenkins-ci.org/public/`.

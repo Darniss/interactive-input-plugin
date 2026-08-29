@@ -1,6 +1,6 @@
 // examples/markdown-showcase/Jenkinsfile
 //
-// Self-contained demo of the interactive-input Markdown rendering, exercising the constructs that the
+// Self-contained demo of the interactive-ci Markdown rendering, exercising the constructs that the
 // Interactive View viewer (and the askInteractive modal context panel) render — with emphasis on the
 // GitHub-Flavored Markdown extensions this plugin enables: TABLES, STRIKETHROUGH and AUTOLINKS.
 //
@@ -56,7 +56,7 @@ pipeline {
 > > A nested quote.
 
 ## 6. Autolinks
-Bare URL: https://plugins.jenkins.io/interactive-input/ and e-mail dev@example.com
+Bare URL: https://plugins.jenkins.io/interactive-ci/ and e-mail dev@example.com
 
 ## 7. Fenced code block (shown as escaped source)
 ```java

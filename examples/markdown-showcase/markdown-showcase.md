@@ -149,5 +149,5 @@ And an entity renders as a symbol: &copy; 2026, 5 &lt; 10.
 | unit | **passed** |
 | integration | ~~flaky~~ passed |
 
-2. A final paragraph with a bare link https://plugins.jenkins.io/interactive-input/ and some
+2. A final paragraph with a bare link https://plugins.jenkins.io/interactive-ci/ and some
    `inline code`, *emphasis*, and a footnote-style reference to the design library above.
